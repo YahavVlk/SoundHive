@@ -60,8 +60,8 @@ public class SoundhiveApiApplication implements CommandLineRunner {
 
 		// Print the top TOP_N tags by weight.
 		System.out.println("Top " + TOP_N + " tags for user " + user.getUsername() + ":");
-//		for (int i = 0; i < TOP_N && !maxHeap.isEmpty(); i++) {
-//			System.out.println(maxHeap.poll());
-//		}
+		for (int i = 0; i < TOP_N && !maxHeap.isEmpty(); i++) {
+			System.out.println(maxHeap.poll());
+		}
 	}
 }
