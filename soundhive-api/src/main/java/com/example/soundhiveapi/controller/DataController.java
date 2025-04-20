@@ -1,36 +1,42 @@
 package com.example.soundhiveapi.controller;
 
+import com.example.soundhiveapi.dto.SongDTO;
 import com.example.soundhiveapi.model.Tag;
-import com.example.soundhiveapi.model.Song;
 import com.example.soundhiveapi.service.MyJdbcService;
+import com.example.soundhiveapi.service.MyJdbcService.SongWithTags;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Data endpoints: now returns SongDTO instead of raw Song.
+ */
 @RestController
 @RequestMapping("/api")
 public class DataController {
 
-    @Autowired
-    private MyJdbcService myJdbcService;
+    @Autowired private MyJdbcService jdbcService;
 
-    // Endpoint to get all tags
-    @GetMapping("/tags")
-    public ResponseEntity<List<Tag>> getAllTags() {
-        List<Tag> tags = myJdbcService.getAllTags();
-        return ResponseEntity.ok(tags);
-    }
-
-    // Endpoint to get a song by its ID
     @GetMapping("/songs/{id}")
-    public ResponseEntity<Song> getSongById(@PathVariable int id) {
-        Song song = myJdbcService.getSongById(id);
-        if (song != null) {
-            return ResponseEntity.ok(song);
+    public ResponseEntity<SongDTO> getSongById(@PathVariable int id) {
+        SongWithTags swt = jdbcService.getSongWithTags(id);
+        if (swt == null) {
+            return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.notFound().build();
+        // convert tags to names
+        List<String> tagNames = new ArrayList<>();
+        for (Tag t : swt.tags) {
+            tagNames.add(t.getTagName());
+        }
+        SongDTO dto = new SongDTO(
+                swt.song.getSongId(),
+                swt.song.getTitle(),
+                swt.song.getArtist(),
+                tagNames
+        );
+        return ResponseEntity.ok(dto);
     }
-
 }
