@@ -1,7 +1,6 @@
 package com.example.soundhiveapi.service;
 
 import com.example.soundhiveapi.model.Song;
-import com.example.soundhiveapi.service.MyJdbcService;
 import com.example.soundhiveapi.neural.NeuralNetwork;
 import com.example.soundhiveapi.repository.SongRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +19,8 @@ public class RecommendationService {
     @Autowired private SongRepository  songRepo;
 
     /**
-     * Returns the top‑K song recommendations for a single user.
+     * Returns the top‑K song recommendations for a single user,
+     * excluding songs from the user’s recent 20 play events.
      */
     public List<Song> recommend(String userId, int topK) {
         // 1) Get the user’s feature vector
@@ -32,25 +32,28 @@ public class RecommendationService {
         // 3) Use the same ID list as training: deterministic order
         List<Integer> songIds = jdbcService.getDistinctSongIds();
 
-        // 4) Sort songIds by descending score
+        // 4) Filter out songs from recent 20 play events
+        Set<Integer> recentlyPlayed = new HashSet<>();
+        jdbcService.getUserPlayEvents(userId)
+                .forEach(song -> recentlyPlayed.add(song.getSongId()));
+
+        // 5) Sort songIds by descending score
         List<Integer> sorted = new ArrayList<>(songIds);
-        Collections.sort(sorted, new Comparator<Integer>() {
-            @Override
-            public int compare(Integer a, Integer b) {
-                // find index in the original list
-                int idxA = songIds.indexOf(a);
-                int idxB = songIds.indexOf(b);
-                // compare corresponding scores
-                return Double.compare(scores[idxB], scores[idxA]);
-            }
+        Collections.sort(sorted, (a, b) -> {
+            int idxA = songIds.indexOf(a);
+            int idxB = songIds.indexOf(b);
+            return Double.compare(scores[idxB], scores[idxA]);
         });
 
-        // 5) Take top K and fetch Song entities
+        // 6) Take top K that are not in recently played
         List<Song> result = new ArrayList<>();
-        for (int i = 0; i < topK && i < sorted.size(); i++) {
-            int id = sorted.get(i);
-            songRepo.findById(id).ifPresent(result::add);
+        for (int id : sorted) {
+            if (recentlyPlayed.contains(id)) continue;
+            Optional<Song> songOpt = songRepo.findById(id);
+            songOpt.ifPresent(result::add);
+            if (result.size() == topK) break;
         }
+
         return result;
     }
 }

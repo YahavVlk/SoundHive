@@ -1,30 +1,33 @@
 package com.example.soundhiveapi.model;
 
 import jakarta.persistence.*;
+import java.io.Serializable;
 
 @Entity
 @Table(name = "user_tagweights")
 @IdClass(UserTagWeightId.class)
-public class UserTagWeight {
+public class UserTagWeight implements Serializable {
 
     @Id
-    @Column(name = "id_number")
+    @Column(nullable = false)
     private String idNumber;
 
     @Id
-    @Column(name = "tag_id")
+    @Column(nullable = false)
     private int tagId;
 
-    @Column(name = "weight")
+    @Column(nullable = false)
     private double weight;
 
-    public UserTagWeight() { }
+    public UserTagWeight() {}
 
     public UserTagWeight(String idNumber, int tagId, double weight) {
         this.idNumber = idNumber;
         this.tagId = tagId;
         this.weight = weight;
     }
+
+    // Getters and Setters
 
     public String getIdNumber() {
         return idNumber;

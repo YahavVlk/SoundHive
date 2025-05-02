@@ -6,6 +6,6 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface UserRepository extends JpaRepository<User, String> {
-    // Custom finder method to find by email
     User findByEmail(String email);
+    boolean existsById(String idNumber);
 }

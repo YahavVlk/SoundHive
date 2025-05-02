@@ -1,11 +1,11 @@
 package com.example.soundhiveapi.model;
 
 import jakarta.persistence.*;
-import java.time.LocalDateTime;
+import java.sql.Timestamp;
 
 @Entity
-@Table(name = "user_playevents")
 @IdClass(UserPlayEventId.class)
+@Table(name = "user_playevents")
 public class UserPlayEvent {
 
     @Id
@@ -16,23 +16,22 @@ public class UserPlayEvent {
     @Column(name = "song_id")
     private int songId;
 
+    @Id
     @Column(name = "play_time")
-    private LocalDateTime playTime;
+    private Timestamp playTime;
 
-    // Optional: if your table has a song_title column
     @Column(name = "song_title")
     private String songTitle;
 
-    public UserPlayEvent() { }
+    public UserPlayEvent() {}
 
-    public UserPlayEvent(String userId, int songId, LocalDateTime playTime, String songTitle) {
+    public UserPlayEvent(String userId, int songId, Timestamp playTime, String songTitle) {
         this.userId = userId;
         this.songId = songId;
         this.playTime = playTime;
         this.songTitle = songTitle;
     }
 
-    // Getters and setters:
     public String getUserId() {
         return userId;
     }
@@ -49,11 +48,11 @@ public class UserPlayEvent {
         this.songId = songId;
     }
 
-    public LocalDateTime getPlayTime() {
+    public Timestamp getPlayTime() {
         return playTime;
     }
 
-    public void setPlayTime(LocalDateTime playTime) {
+    public void setPlayTime(Timestamp playTime) {
         this.playTime = playTime;
     }
 

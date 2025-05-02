@@ -1,24 +1,19 @@
 package com.example.soundhiveapi.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 
 @Entity
-@Table(name = "TAGS")  // Ensure this matches your MySQL table name
+@Table(name = "tags")
 public class Tag {
 
     @Id
-    private int tagId; // or serialNumber if that's what your DB uses
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int tagId;
+
+    @Column(unique = true, nullable = false)
     private String tagName;
 
-    public Tag() {
-    }
-
-    public Tag(int tagId, String tagName) {
-        this.tagId = tagId;
-        this.tagName = tagName;
-    }
+    // Getters and Setters
 
     public int getTagId() {
         return tagId;
@@ -34,13 +29,5 @@ public class Tag {
 
     public void setTagName(String tagName) {
         this.tagName = tagName;
-    }
-
-    @Override
-    public String toString() {
-        return "Tag{" +
-                "tagId=" + tagId +
-                ", tagName='" + tagName + '\'' +
-                '}';
     }
 }

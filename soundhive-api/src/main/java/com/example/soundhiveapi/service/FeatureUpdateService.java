@@ -2,75 +2,119 @@ package com.example.soundhiveapi.service;
 
 import com.example.soundhiveapi.model.Song;
 import com.example.soundhiveapi.model.Tag;
+import com.example.soundhiveapi.model.UserPlayEvent;
 import com.example.soundhiveapi.model.UserTagWeight;
 import com.example.soundhiveapi.repository.SongRepository;
+import com.example.soundhiveapi.repository.UserPlayEventRepository;
 import com.example.soundhiveapi.repository.UserTagWeightRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 
-/**
- * Applies per‑song feedback to user tag‑weights in memory and flushes them back to MySQL.
- */
 @Service
 public class FeatureUpdateService {
 
-    private static final double ALPHA = 0.1;
+    private static final int MAX_EVENTS = 20;
 
-    @Autowired private MyJdbcService              jdbc;
-    @Autowired private UserTagWeightRepository   repo;      // UserTagWeightRepository
-    @Autowired private SongRepository             songRepo;  // SongRepository
+    private final MyJdbcService jdbc;
+    private final UserTagWeightRepository tagWeightRepo;
+    private final SongRepository songRepo;
+    private final UserPlayEventRepository playRepo;
 
-    // In‑memory cache: userId → tag‑vector
-    private final Map<String,double[]> cache = new HashMap<>();
+    private final Map<String, double[]> tagCache  = new HashMap<>();
+    private final Map<String, Deque<Integer>> playCache = new HashMap<>();
 
+    @Autowired
+    public FeatureUpdateService(
+            MyJdbcService jdbc,
+            UserTagWeightRepository tagWeightRepo,
+            SongRepository songRepo,
+            UserPlayEventRepository playRepo
+    ) {
+        this.jdbc = jdbc;
+        this.tagWeightRepo = tagWeightRepo;
+        this.songRepo = songRepo;
+        this.playRepo = playRepo;
+    }
 
-    public void recordFeedback(String userId,
-                               int songId,
-                               long timestamp,
-                               boolean isFavorite) {
-        // 1) load or init this user’s tag‑vector
-        double[] w = cache.computeIfAbsent(
-                userId,
-                id -> jdbc.getUserTagWeightsArray(id).clone()
-        );
+    public void recordFeedback(String userId, int songId, long timestamp, boolean isFavorite) {
+        double[] w = tagCache.computeIfAbsent(userId, id -> jdbc.getUserTagWeightsArray(id).clone());
 
-        // 2) derive actual outcome
-        double actual = isFavorite
-                ? 1.0
-                : (timestamp >= 0.2 * jdbc.getSongDuration(songId) ? 1.0 : 0.0);
+        boolean liked = isFavorite || (timestamp >= 0.2 * jdbc.getSongDuration(songId));
+        if (!liked) return;
 
-        // 3) get predicted score
-        double predicted = jdbc.getPredictedScore(userId, songId);
-
-        // 4) compute residual
-        double residual  = actual - predicted;
-
-        // 5) load the Song plus its parsed tag list
         MyJdbcService.SongWithTags swt = jdbc.getSongWithTags(songId);
         if (swt == null) return;
 
-        // 6) update each tag‑weight
-        for (Tag t : swt.tags) {
-            int idx = jdbc.getTagIndex(t.getTagId());
-            if (idx < 0) continue;
-            w[idx] = clamp(w[idx] + ALPHA * residual);
+        Set<Integer> boosted = new HashSet<>();
+        for (Tag tag : swt.tags) {
+            int idx = jdbc.getTagIndex(tag.getTagId());
+            if (idx >= 0) {
+                w[idx] = clamp(w[idx] + 0.05 * (1.0 - w[idx]));
+                boosted.add(idx);
+            }
+        }
+
+        for (int i = 0; i < w.length; i++) {
+            if (!boosted.contains(i)) {
+                w[i] = clamp(w[i] - 0.02 * (w[i] - 0.1));
+            }
+        }
+
+        Deque<Integer> queue = playCache.computeIfAbsent(userId, id -> new ArrayDeque<>());
+        if (!queue.contains(songId)) {
+            queue.addLast(songId);
+            if (queue.size() > MAX_EVENTS) {
+                queue.removeFirst();
+            }
         }
     }
 
+    @Transactional
     public void flushToDb() {
-        List<Integer> tagIds = jdbc.getDistinctTagIds();
-        List<UserTagWeight> batch = new ArrayList<>();
+        try {
+            List<Integer> tagIds = jdbc.getDistinctTagIds();
+            Map<Integer, String> songTitles = jdbc.getSongTitlesMap();
+            LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Jerusalem"));
 
-        for (Map.Entry<String,double[]> e : cache.entrySet()) {
-            String userId    = e.getKey();
-            double[] weights = e.getValue();
-            for (int i = 0; i < tagIds.size(); i++) {
-                batch.add(new UserTagWeight(userId, tagIds.get(i), weights[i]));
+            List<UserTagWeight> weights = new ArrayList<>();
+            List<UserPlayEvent> events = new ArrayList<>();
+
+            for (Map.Entry<String, double[]> entry : tagCache.entrySet()) {
+                String userId = entry.getKey();
+                double[] vec = entry.getValue();
+
+                for (int i = 0; i < tagIds.size(); i++) {
+                    weights.add(new UserTagWeight(userId, tagIds.get(i), vec[i]));
+                }
+
+                playRepo.deleteByUserId(userId);
+
+                int offset = 0;
+                for (Integer sid : playCache.getOrDefault(userId, new ArrayDeque<>())) {
+                    String title = songTitles.get(sid);
+                    if (title == null) continue;
+
+                    UserPlayEvent ev = new UserPlayEvent();
+                    ev.setUserId(userId);
+                    ev.setSongId(sid);
+                    ev.setSongTitle(title);
+                    ev.setPlayTime(Timestamp.valueOf(now.plusSeconds(offset++)));
+                    events.add(ev);
+                }
             }
+
+            tagWeightRepo.saveAll(weights);
+            playRepo.saveAll(events);
+
+        } catch (Exception ex) {
+            ex.printStackTrace();
         }
-        repo.saveAll(batch);
     }
 
     private double clamp(double x) {

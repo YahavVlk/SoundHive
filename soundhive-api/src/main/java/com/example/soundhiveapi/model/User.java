@@ -1,29 +1,29 @@
 package com.example.soundhiveapi.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 @Entity
-@Table(name = "USERS")  // Make sure the table name matches your MySQL table
+@Table(name = "users")
 public class User {
 
     @Id
-    private String idNumber; // Assuming idNumber is unique
+    @Column(name = "id_number", length = 9, nullable = false)
+    @Size(min = 9, max = 9, message = "ID number must be exactly 9 digits")
+    @Pattern(regexp = "\\d{9}",  message = "ID number must contain only digits")
+    private String idNumber;
+
+    @Column(nullable = false)
     private String username;
+
+    @Column(nullable = false, unique = true)
     private String email;
-    private String password; // You’ll need this for login
 
-    // Constructors, getters, and setters
-    public User() {
-    }
+    @Column(nullable = false)
+    private String password;  // Stored as BCrypt hash
 
-    public User(String idNumber, String username, String email, String password) {
-        this.idNumber = idNumber;
-        this.username = username;
-        this.email = email;
-        this.password = password;
-    }
+    // Getters and Setters
 
     public String getIdNumber() {
         return idNumber;

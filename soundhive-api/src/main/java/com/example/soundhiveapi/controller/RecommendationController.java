@@ -43,11 +43,15 @@ public class RecommendationController {
                 tagNames.add(t.getTagName());
             }
             dtos.add(new SongDTO(
-                    swt.song.getSongId(),
-                    swt.song.getTitle(),
-                    swt.song.getArtist(),
-                    tagNames
-            ));
+                            swt.song.getSongId(),
+                            swt.song.getTitle(),
+                            swt.song.getArtist(),
+                            tagNames,
+                            jdbcService.getTagWeightsForUser(userId, swt.tags),
+                            swt.song.getSongLength()
+                    )
+            );
+
         }
         return ResponseEntity.ok(dtos);
     }

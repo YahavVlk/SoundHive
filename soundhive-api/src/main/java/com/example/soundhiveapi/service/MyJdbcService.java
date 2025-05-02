@@ -1,19 +1,16 @@
 package com.example.soundhiveapi.service;
 
-import com.example.soundhiveapi.model.Song;
-import com.example.soundhiveapi.model.Tag;
-import com.example.soundhiveapi.model.User;
-import com.example.soundhiveapi.model.UserPlayEvent;
-import com.example.soundhiveapi.model.UserTagWeight;
+import com.example.soundhiveapi.model.*;
 import com.example.soundhiveapi.neural.NeuralNetwork;
-import com.example.soundhiveapi.repository.SongRepository;
-import com.example.soundhiveapi.repository.TagRepository;
-import com.example.soundhiveapi.repository.UserPlayEventRepository;
-import com.example.soundhiveapi.repository.UserRepository;
-import com.example.soundhiveapi.repository.UserTagWeightRepository;
+import com.example.soundhiveapi.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.*;
 
 /**
@@ -25,6 +22,11 @@ import java.util.*;
  */
 @Service
 public class MyJdbcService {
+
+    private final DataSource dataSource;
+    public MyJdbcService(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
 
     @Autowired private UserRepository            userRepository;
     @Autowired private TagRepository             tagRepository;
@@ -56,8 +58,7 @@ public class MyJdbcService {
     // 5) Return last 20 played songs for a user
     public Queue<Song> getUserPlayEvents(String userId) {
         List<UserPlayEvent> events =
-                userPlayEventRepository
-                        .findTop20ByUserIdOrderByPlayTimeDesc(userId);
+                userPlayEventRepository.findTop20ByUserIdOrderByPlayTimeDesc(userId);
         Queue<Song> queue = new LinkedList<>();
         for (UserPlayEvent e : events) {
             Song s = getSongById(e.getSongId());
@@ -73,13 +74,11 @@ public class MyJdbcService {
         int U = userIds.size(), T = tags.size();
         double[][] matrix = new double[U][T];
 
-        // build tagId → column index
         Map<Integer,Integer> tagIndex = new HashMap<>();
         for (int i = 0; i < T; i++) {
             tagIndex.put(tags.get(i).getTagId(), i);
         }
 
-        // fill matrix from all stored weights
         List<UserTagWeight> weights = userTagWeightRepository.findAll();
         for (UserTagWeight w : weights) {
             int uidx = userIds.indexOf(w.getIdNumber());
@@ -109,8 +108,7 @@ public class MyJdbcService {
         if (row < 0) return heap;
         for (int i = 0; i < tags.size(); i++) {
             Tag t = tags.get(i);
-            heap.add(new TagWeight(t.getTagId(), t.getTagName(),
-                    matrix[row][i]));
+            heap.add(new TagWeight(t.getTagId(), t.getTagName(), matrix[row][i]));
         }
         return heap;
     }
@@ -119,8 +117,7 @@ public class MyJdbcService {
     public double[] getUserTagWeightsArray(String userId) {
         List<Tag> tags = getAllTags();
         double[] vector = new double[tags.size()];
-        List<UserTagWeight> uw = userTagWeightRepository
-                .findByIdNumber(userId);
+        List<UserTagWeight> uw = userTagWeightRepository.findByIdNumber(userId);
         for (UserTagWeight w : uw) {
             int tid = w.getTagId();
             for (int i = 0; i < tags.size(); i++) {
@@ -212,4 +209,37 @@ public class MyJdbcService {
             this.weight  = weight;
         }
     }
+
+    public List<Double> getTagWeightsForUser(String userId, List<Tag> tags) {
+        double[] vector = getUserTagWeightsArray(userId);
+        List<Double> weights = new ArrayList<>();
+        for (Tag t : tags) {
+            int idx = getTagIndex(t.getTagId());
+            weights.add(idx >= 0 ? vector[idx] : 0.0);
+        }
+        return weights;
+    }
+
+    public Map<Integer, String> getSongTitlesMap() {
+        String query = "SELECT song_id, title FROM songs";
+        Map<Integer, String> map = new HashMap<>();
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(query);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                int id = rs.getInt("song_id");
+                String title = rs.getString("title");
+                map.put(id, title);
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return map;
+    }
+
+
 }
