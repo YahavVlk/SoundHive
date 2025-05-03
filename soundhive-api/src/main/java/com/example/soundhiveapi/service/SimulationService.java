@@ -24,6 +24,8 @@ public class SimulationService {
      * @param feedbackIntervalPct  fraction of song duration between feedback points (e.g. 0.2 for 20%)
      */
     public void simulateSession(String userId, int numSongs, double feedbackIntervalPct) {
+        System.out.println("[simulateSession] Simulating session for userId=" + userId + ", numSongs=" + numSongs + ", interval=" + feedbackIntervalPct);
+
         // 1) Get the top-N songs according to current recommendations
         List<Song> recommended = recommendationService.recommend(userId, numSongs);
 

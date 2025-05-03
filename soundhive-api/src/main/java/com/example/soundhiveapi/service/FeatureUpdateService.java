@@ -43,6 +43,8 @@ public class FeatureUpdateService {
     }
 
     public void recordFeedback(String userId, int songId, long timestamp, boolean isFavorite) {
+        System.out.println("[recordFeedback] userId=" + userId + ", songId=" + songId + ", timestamp=" + timestamp + ", isFavorite=" + isFavorite);
+
         double[] w = tagCache.computeIfAbsent(userId, id -> jdbc.getUserTagWeightsArray(id).clone());
 
         boolean liked = isFavorite || (timestamp >= 0.2 * jdbc.getSongDuration(songId));
@@ -77,6 +79,10 @@ public class FeatureUpdateService {
 
     @Transactional
     public void flushToDb() {
+        if (tagCache.isEmpty() && playCache.isEmpty()) return;
+
+        System.out.println("[flushToDb] Flushing data to DB...");
+
         try {
             List<Integer> tagIds = jdbc.getDistinctTagIds();
             Map<Integer, String> songTitles = jdbc.getSongTitlesMap();
@@ -111,6 +117,12 @@ public class FeatureUpdateService {
 
             tagWeightRepo.saveAll(weights);
             playRepo.saveAll(events);
+
+            System.out.println("[flushToDb] Saved " + weights.size() + " weights and " + events.size() + " events.");
+
+            // ✅ Clear caches after successful flush
+            tagCache.clear();
+            playCache.clear();
 
         } catch (Exception ex) {
             ex.printStackTrace();
