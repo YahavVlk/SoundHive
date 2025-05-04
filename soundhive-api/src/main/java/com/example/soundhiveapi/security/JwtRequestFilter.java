@@ -32,8 +32,12 @@ public class JwtRequestFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String authHeader = request.getHeader("Authorization");
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
+
             String jwt   = authHeader.substring(7);
+            System.out.println("🔐 JWT Token Received: " + jwt);
+
             String email = jwtUtil.extractUsername(jwt);
+            System.out.println("📧 Extracted email: " + email);
 
             // Reject if revoked
             if (tokenBlacklist.isRevoked(jwt)) {
@@ -44,6 +48,8 @@ public class JwtRequestFilter extends OncePerRequestFilter {
             if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails ud = userDetailsService.loadUserByUsername(email);
                 if (jwtUtil.validateToken(jwt, ud)) {
+                    System.out.println("✅ JWT is valid for user: " + ud.getUsername());
+
                     UsernamePasswordAuthenticationToken auth =
                             new UsernamePasswordAuthenticationToken(ud, null, ud.getAuthorities());
                     auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));

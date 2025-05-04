@@ -7,58 +7,45 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.*;
 
-/**
- * JDBC‑style service providing:
- *  • user/tag/song retrieval
- *  • user×tag matrix builders
- *  • feedback‑and‑prediction helpers
- *  • parsing of rawTags into real Tag objects
- */
 @Service
 public class MyJdbcService {
 
     private final DataSource dataSource;
+
     public MyJdbcService(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
-    @Autowired private UserRepository            userRepository;
-    @Autowired private TagRepository             tagRepository;
-    @Autowired private SongRepository            songRepository;
-    @Autowired private UserTagWeightRepository   userTagWeightRepository;
-    @Autowired private UserPlayEventRepository   userPlayEventRepository;
-    @Autowired private NeuralNetwork             neuralNetwork;
+    @Autowired private UserRepository userRepository;
+    @Autowired private TagRepository tagRepository;
+    @Autowired private SongRepository songRepository;
+    @Autowired private UserTagWeightRepository userTagWeightRepository;
+    @Autowired private UserPlayEventRepository userPlayEventRepository;
+    @Autowired private NeuralNetwork neuralNetwork;
 
-    // 1) Find a user by email
+    private final Map<Integer, Integer> songIndexCache = new HashMap<>();
+
     public User getUserByEmail(String email) {
         return userRepository.findByEmail(email);
     }
 
-    // 2) Validate password
     public boolean checkPassword(User user, String password) {
         return user != null && user.getPassword().equals(password);
     }
 
-    // 3) Return all tags ordered by tagId ascending
     public List<Tag> getAllTags() {
         return tagRepository.findAllByOrderByTagIdAsc();
     }
 
-    // 4) Retrieve a Song by its ID
     public Song getSongById(int songId) {
         return songRepository.findById(songId).orElse(null);
     }
 
-    // 5) Return last 20 played songs for a user
     public Queue<Song> getUserPlayEvents(String userId) {
-        List<UserPlayEvent> events =
-                userPlayEventRepository.findTop20ByUserIdOrderByPlayTimeDesc(userId);
+        List<UserPlayEvent> events = userPlayEventRepository.findTop20ByUserIdOrderByPlayTimeDesc(userId);
         Queue<Song> queue = new LinkedList<>();
         for (UserPlayEvent e : events) {
             Song s = getSongById(e.getSongId());
@@ -67,10 +54,9 @@ public class MyJdbcService {
         return queue;
     }
 
-    // 6) Build the user × tag weights matrix
     public double[][] getUserTagWeightsMatrix() {
         List<String> userIds = getDistinctUserIds();
-        List<Tag>    tags    = getAllTags();
+        List<Tag> tags = getAllTags();
         int U = userIds.size(), T = tags.size();
         double[][] matrix = new double[U][T];
 
@@ -90,21 +76,13 @@ public class MyJdbcService {
         return matrix;
     }
 
-    // 7) Return list of all distinct user IDs
     public List<String> getDistinctUserIds() {
         return userTagWeightRepository.findDistinctUserIds();
     }
 
-    // 8) For a given user, get a max‑heap of their tag weights
-    public PriorityQueue<TagWeight> getUserTagMaxHeap(
-            String userId,
-            double[][] matrix,
-            List<String> userIds,
-            List<Tag> tags
-    ) {
+    public PriorityQueue<TagWeight> getUserTagMaxHeap(String userId, double[][] matrix, List<String> userIds, List<Tag> tags) {
         int row = userIds.indexOf(userId);
-        PriorityQueue<TagWeight> heap =
-                new PriorityQueue<>((a,b) -> Double.compare(b.weight, a.weight));
+        PriorityQueue<TagWeight> heap = new PriorityQueue<>((a, b) -> Double.compare(b.weight, a.weight));
         if (row < 0) return heap;
         for (int i = 0; i < tags.size(); i++) {
             Tag t = tags.get(i);
@@ -113,7 +91,6 @@ public class MyJdbcService {
         return heap;
     }
 
-    // 9) Get a single user’s tag‑weights vector
     public double[] getUserTagWeightsArray(String userId) {
         List<Tag> tags = getAllTags();
         double[] vector = new double[tags.size()];
@@ -130,15 +107,17 @@ public class MyJdbcService {
         return vector;
     }
 
-    // 10) Get all song IDs in stable order
     public List<Integer> getDistinctSongIds() {
         List<Song> songs = songRepository.findAll();
         List<Integer> ids = new ArrayList<>();
-        for (Song s : songs) ids.add(s.getSongId());
+        for (int s = 0; s < songs.size(); s++) {
+            int id = songs.get(s).getSongId();
+            ids.add(id);
+            songIndexCache.putIfAbsent(id, s);
+        }
         return ids;
     }
 
-    // 11) Get all tag IDs in stable order
     public List<Integer> getDistinctTagIds() {
         List<Tag> tags = getAllTags();
         List<Integer> ids = new ArrayList<>();
@@ -146,7 +125,6 @@ public class MyJdbcService {
         return ids;
     }
 
-    // 12) Map a tagId to its index in the tag‑vector
     public int getTagIndex(int tagId) {
         List<Integer> ids = getDistinctTagIds();
         for (int i = 0; i < ids.size(); i++) {
@@ -155,28 +133,42 @@ public class MyJdbcService {
         return -1;
     }
 
-    // 13) Predict score for (userId, songId)
     public double getPredictedScore(String userId, int songId) {
-        double[] in     = getUserTagWeightsArray(userId);
-        double[] scores = neuralNetwork.predict(in);
-        List<Integer> sids = getDistinctSongIds();
-        for (int i = 0; i < sids.size(); i++) {
-            if (sids.get(i) == songId) return scores[i];
+        double[] input = getUserTagWeightsArray(userId);
+        double[] predictions = neuralNetwork.predict(input);
+        Integer idx = songIndexCache.get(songId);
+        if (idx == null) {
+            List<Integer> all = getDistinctSongIds();
+            idx = all.indexOf(songId);
+            if (idx != -1) songIndexCache.put(songId, idx);
         }
-        return 0.0;
+        return idx != null && idx >= 0 && idx < predictions.length ? predictions[idx] : 0.0;
     }
 
-    // 14) Stub: song duration in ms
+    public double[] getPredictedScores(String userId) {
+        double[] input = getUserTagWeightsArray(userId);
+        return neuralNetwork.predict(input);
+    }
+
+    public Map<Integer, Double> getPredictedScoreMap(String userId) {
+        double[] scores = getPredictedScores(userId);
+        List<Integer> songIds = getDistinctSongIds();
+        Map<Integer, Double> map = new HashMap<>();
+        for (int i = 0; i < songIds.size(); i++) {
+            map.put(songIds.get(i), scores[i]);
+        }
+        return map;
+    }
+
     public long getSongDuration(int songId) {
-        return 180_000; // default 3 minutes
+        return 180_000;
     }
 
-    // 15) Load a Song plus parse its rawTags into real Tag objects
     public SongWithTags getSongWithTags(int songId) {
         Song song = getSongById(songId);
         if (song == null) return null;
 
-        String raw = song.getRawTags(); // comma-separated, e.g. "Pop,Rock,..."
+        String raw = song.getRawTags();
         List<Tag> list = new ArrayList<>();
         if (raw != null && !raw.isEmpty()) {
             String[] parts = raw.split(",");
@@ -188,9 +180,8 @@ public class MyJdbcService {
         return new SongWithTags(song, list);
     }
 
-    /** Container for a Song plus its parsed Tag list. */
     public static class SongWithTags {
-        public final Song      song;
+        public final Song song;
         public final List<Tag> tags;
         public SongWithTags(Song song, List<Tag> tags) {
             this.song = song;
@@ -198,15 +189,14 @@ public class MyJdbcService {
         }
     }
 
-    /** Helper for max‑heap of tag weights. */
     public static class TagWeight {
-        public final int    tagId;
+        public final int tagId;
         public final String tagName;
         public final double weight;
         public TagWeight(int tagId, String tagName, double weight) {
-            this.tagId   = tagId;
+            this.tagId = tagId;
             this.tagName = tagName;
-            this.weight  = weight;
+            this.weight = weight;
         }
     }
 
@@ -241,5 +231,56 @@ public class MyJdbcService {
         return map;
     }
 
+    public String getSongTitle(int songId) {
+        String query = "SELECT title FROM songs WHERE song_id = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(query)) {
+
+            stmt.setInt(1, songId);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                return rs.getString("title");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return "Unknown Title";
+    }
+
+    public Set<Integer> getCollaborativeCandidates(String userId) {
+        Set<Integer> result = new HashSet<>();
+        String sql = """
+        SELECT DISTINCT sp.song_id
+        FROM user_playevents sp
+        JOIN (
+            SELECT tag_id
+            FROM user_tagweights
+            WHERE id_number = ?
+            ORDER BY weight DESC
+            LIMIT 5
+        ) AS top_tags ON EXISTS (
+            SELECT 1
+            FROM song_tags st
+            WHERE st.song_id = sp.song_id
+              AND st.tag_id = top_tags.tag_id
+        )
+        WHERE sp.user_id != ?
+        LIMIT 50
+    """;
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, userId);
+            stmt.setString(2, userId);
+            ResultSet rs = stmt.executeQuery();
+            while (rs.next()) {
+                result.add(rs.getInt("song_id"));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return result;
+    }
 
 }

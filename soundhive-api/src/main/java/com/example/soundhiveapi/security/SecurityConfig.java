@@ -15,40 +15,29 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JdbcUserDetailsService userDetailsService;
-    private final JwtRequestFilter       jwtRequestFilter;
+    private final JwtRequestFilter jwtRequestFilter;
 
     public SecurityConfig(JdbcUserDetailsService uds, JwtRequestFilter jwtRequestFilter) {
         this.userDetailsService = uds;
-        this.jwtRequestFilter   = jwtRequestFilter;
+        this.jwtRequestFilter = jwtRequestFilter;
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // disable CSRF for stateless REST API
                 .csrf(csrf -> csrf.disable())
-
-                // make session stateless; every request needs a token
                 .sessionManagement(sm ->
                         sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
-
-                // configure public vs. protected endpoints
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/api/login",
-                                "/api/register",
-                                "/api/tags",
-                                "/api/reset-password"   // <— allow password resets without token
+                                "/api/auth/**",          // ✅ all auth endpoints
+                                "/api/tags",             // ✅ allow tag retrieval
+                                "/api/reset-password"    // ✅ allow resets
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
-
-                // insert our JWT filter
-                .addFilterBefore(jwtRequestFilter,
-                        UsernamePasswordAuthenticationFilter.class)
-
-                // no default login form
+                .addFilterBefore(jwtRequestFilter, UsernamePasswordAuthenticationFilter.class)
                 .httpBasic(Customizer.withDefaults());
 
         return http.build();

@@ -15,7 +15,7 @@ public class FeedbackController {
         public String  userId;
         public int     songId;
         public long    timestamp;     // ms since song start
-        public boolean isFavorite;     // true if user “hearted” it
+        public boolean isFavorite;    // true if user “hearted” it
     }
 
     // POST /api/feedback
@@ -25,7 +25,8 @@ public class FeedbackController {
                 req.userId,
                 req.songId,
                 req.timestamp,
-                req.isFavorite
+                req.isFavorite,
+                false // manually submitted feedback is never an unfavorite
         );
         return ResponseEntity.ok("Feedback recorded");
     }

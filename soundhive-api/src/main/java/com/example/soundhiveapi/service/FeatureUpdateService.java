@@ -1,135 +1,133 @@
 package com.example.soundhiveapi.service;
 
-import com.example.soundhiveapi.model.Song;
 import com.example.soundhiveapi.model.Tag;
-import com.example.soundhiveapi.model.UserPlayEvent;
+import com.example.soundhiveapi.model.UserTagWeightId;
 import com.example.soundhiveapi.model.UserTagWeight;
-import com.example.soundhiveapi.repository.SongRepository;
-import com.example.soundhiveapi.repository.UserPlayEventRepository;
+import com.example.soundhiveapi.model.UserPlayEvent;
 import com.example.soundhiveapi.repository.UserTagWeightRepository;
+import com.example.soundhiveapi.repository.UserPlayEventRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class FeatureUpdateService {
 
     private static final int MAX_EVENTS = 20;
 
-    private final MyJdbcService jdbc;
-    private final UserTagWeightRepository tagWeightRepo;
-    private final SongRepository songRepo;
-    private final UserPlayEventRepository playRepo;
+    @Autowired private MyJdbcService              jdbc;
+    @Autowired private UserTagWeightRepository    tagWeightRepo;
+    @Autowired private UserPlayEventRepository    playRepo;
 
     private final Map<String, double[]> tagCache  = new HashMap<>();
     private final Map<String, Deque<Integer>> playCache = new HashMap<>();
+    private final Map<String, List<UserTagWeight>> pendingUpdates = new HashMap<>();
 
-    @Autowired
-    public FeatureUpdateService(
-            MyJdbcService jdbc,
-            UserTagWeightRepository tagWeightRepo,
-            SongRepository songRepo,
-            UserPlayEventRepository playRepo
-    ) {
-        this.jdbc = jdbc;
-        this.tagWeightRepo = tagWeightRepo;
-        this.songRepo = songRepo;
-        this.playRepo = playRepo;
-    }
+    public void recordFeedback(String userId, int songId, long timestamp, boolean isFavorite, boolean isUnfavorited) {
+        double actualPct = Math.min(1.0, timestamp / (double) jdbc.getSongDuration(songId));
+        System.out.printf("[recordFeedback] userId=%s, songId=%d, timestamp=%d, isFavorite=%s, isUnfavorited=%s%n",
+                userId, songId, timestamp, isFavorite, isUnfavorited);
 
-    public void recordFeedback(String userId, int songId, long timestamp, boolean isFavorite) {
-        System.out.println("[recordFeedback] userId=" + userId + ", songId=" + songId + ", timestamp=" + timestamp + ", isFavorite=" + isFavorite);
+        savePlayEvent(userId, songId);
 
-        double[] w = tagCache.computeIfAbsent(userId, id -> jdbc.getUserTagWeightsArray(id).clone());
-
-        boolean liked = isFavorite || (timestamp >= 0.2 * jdbc.getSongDuration(songId));
-        if (!liked) return;
-
-        MyJdbcService.SongWithTags swt = jdbc.getSongWithTags(songId);
-        if (swt == null) return;
-
-        Set<Integer> boosted = new HashSet<>();
-        for (Tag tag : swt.tags) {
-            int idx = jdbc.getTagIndex(tag.getTagId());
-            if (idx >= 0) {
-                w[idx] = clamp(w[idx] + 0.05 * (1.0 - w[idx]));
-                boosted.add(idx);
-            }
+        List<Tag> tags = jdbc.getSongWithTags(songId).tags;
+        List<UserTagWeight> weights = tagWeightRepo.findByIdNumber(userId);
+        Map<Integer, UserTagWeight> weightMap = new HashMap<>();
+        for (UserTagWeight w : weights) {
+            weightMap.put(w.getTagId(), w);
         }
 
-        for (int i = 0; i < w.length; i++) {
-            if (!boosted.contains(i)) {
-                w[i] = clamp(w[i] - 0.02 * (w[i] - 0.1));
+        double positiveDelta = 0.07;
+        double negativeDelta = 0.01;
+
+        for (Tag tag : tags) {
+            UserTagWeight w = weightMap.getOrDefault(tag.getTagId(), new UserTagWeight(userId, tag.getTagId(), 0.2));
+            double old = w.getWeight();
+            double newWeight = old;
+
+            if (isFavorite || actualPct >= 0.8) {
+                newWeight += positiveDelta;
+            } else if (actualPct <= 0.4 || isUnfavorited) {
+                newWeight -= negativeDelta;
             }
+
+            newWeight = Math.min(1.0, Math.max(0.05, newWeight));
+            w.setWeight(newWeight);
+            weightMap.put(tag.getTagId(), w);
         }
 
-        Deque<Integer> queue = playCache.computeIfAbsent(userId, id -> new ArrayDeque<>());
-        if (!queue.contains(songId)) {
-            queue.addLast(songId);
-            if (queue.size() > MAX_EVENTS) {
-                queue.removeFirst();
-            }
-        }
+        pendingUpdates.computeIfAbsent(userId, k -> new ArrayList<>()).addAll(weightMap.values());
     }
 
     @Transactional
     public void flushToDb() {
-        if (tagCache.isEmpty() && playCache.isEmpty()) return;
-
         System.out.println("[flushToDb] Flushing data to DB...");
-
-        try {
-            List<Integer> tagIds = jdbc.getDistinctTagIds();
-            Map<Integer, String> songTitles = jdbc.getSongTitlesMap();
-            LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Jerusalem"));
-
-            List<UserTagWeight> weights = new ArrayList<>();
-            List<UserPlayEvent> events = new ArrayList<>();
-
-            for (Map.Entry<String, double[]> entry : tagCache.entrySet()) {
-                String userId = entry.getKey();
-                double[] vec = entry.getValue();
-
-                for (int i = 0; i < tagIds.size(); i++) {
-                    weights.add(new UserTagWeight(userId, tagIds.get(i), vec[i]));
-                }
-
-                playRepo.deleteByUserId(userId);
-
-                int offset = 0;
-                for (Integer sid : playCache.getOrDefault(userId, new ArrayDeque<>())) {
-                    String title = songTitles.get(sid);
-                    if (title == null) continue;
-
-                    UserPlayEvent ev = new UserPlayEvent();
-                    ev.setUserId(userId);
-                    ev.setSongId(sid);
-                    ev.setSongTitle(title);
-                    ev.setPlayTime(Timestamp.valueOf(now.plusSeconds(offset++)));
-                    events.add(ev);
-                }
-            }
-
-            tagWeightRepo.saveAll(weights);
-            playRepo.saveAll(events);
-
-            System.out.println("[flushToDb] Saved " + weights.size() + " weights and " + events.size() + " events.");
-
-            // ✅ Clear caches after successful flush
-            tagCache.clear();
-            playCache.clear();
-
-        } catch (Exception ex) {
-            ex.printStackTrace();
+        int count = 0;
+        for (Map.Entry<String, List<UserTagWeight>> entry : pendingUpdates.entrySet()) {
+            tagWeightRepo.saveAll(entry.getValue());
+            count += entry.getValue().size();
         }
+        pendingUpdates.clear();
+        System.out.printf("[flushToDb] Saved %d weights and %d events.%n",
+                count, playCache.values().stream().mapToInt(Deque::size).sum());
     }
 
-    private double clamp(double x) {
-        return Math.max(0.0, Math.min(1.0, x));
+    private void savePlayEvent(String userId, int songId) {
+        playCache.putIfAbsent(userId, new ArrayDeque<>());
+        Deque<Integer> q = playCache.get(userId);
+
+        List<UserPlayEvent> existing = playRepo.findAllByUserId(userId);
+        Set<Integer> existingSongIds = existing.stream()
+                .map(UserPlayEvent::getSongId)
+                .collect(Collectors.toSet());
+
+        if (existingSongIds.contains(songId)) {
+            existing.stream()
+                    .filter(e -> e.getSongId() == songId)
+                    .findFirst()
+                    .ifPresent(playRepo::delete);
+            q.remove(songId);
+        }
+
+        if (q.size() == MAX_EVENTS) {
+            Integer oldest = q.pollFirst();
+            existing.stream()
+                    .filter(e -> e.getSongId() == oldest)
+                    .findFirst()
+                    .ifPresent(playRepo::delete);
+        }
+
+        q.addLast(songId);
+
+        UserPlayEvent ev = new UserPlayEvent();
+        ev.setUserId(userId);
+        ev.setSongId(songId);
+        ev.setSongTitle(jdbc.getSongTitle(songId));
+
+        long offset = q.size();
+        long millisOffset = offset * 1000L + new Random().nextInt(1000);
+        ev.setPlayTime(new Timestamp(System.currentTimeMillis() + millisOffset));
+
+        playRepo.save(ev);
+    }
+
+    private UserTagWeight getOrCreateWeight(String userId, int tagId) {
+        UserTagWeightId key = new UserTagWeightId(userId, tagId);
+        Optional<UserTagWeight> opt = tagWeightRepo.findById(key);
+        return opt.orElse(new UserTagWeight(userId, tagId, 0.2));
+    }
+
+    public void normalizeWeights(String userId) {
+        List<UserTagWeight> weights = tagWeightRepo.findByIdNumber(userId);
+        double sum = weights.stream().mapToDouble(UserTagWeight::getWeight).sum();
+        for (UserTagWeight w : weights) {
+            double normalized = w.getWeight() / sum;
+            w.setWeight(normalized);
+        }
+        tagWeightRepo.saveAll(weights);
     }
 }

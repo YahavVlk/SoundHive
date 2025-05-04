@@ -21,7 +21,7 @@ import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/auth") // ✅ FIXED HERE
 public class AuthController {
 
     @Autowired private JdbcUserDetailsService  userDetailsService;
@@ -54,9 +54,7 @@ public class AuthController {
 
         String storedPassword = user.getPassword();
 
-        // Check if the stored password is not encrypted (assume plain if it's exactly 'secret123')
         if ("secret123".equals(storedPassword)) {
-            // Encrypt and save it
             String encrypted = encoder.encode("secret123");
             user.setPassword(encrypted);
             userRepo.save(user);
@@ -72,19 +70,17 @@ public class AuthController {
         return ResponseEntity.ok(new JwtResponse(token));
     }
 
-
     // --- REGISTER ---
 
     public static class RegisterRequest {
         @Size(min = 9, max = 9, message = "ID number must be exactly 9 digits")
         @Pattern(regexp = "\\d{9}", message = "ID number must be numeric")
-        public String        idNumber;       // optional: supply your own 9-digit ID
+        public String        idNumber;
         public String        username;
         public String        email;
         public String        password;
         public List<Integer> selectedTagIds; // exactly 5
     }
-
 
     public static class RegisterResponse {
         public String idNumber;

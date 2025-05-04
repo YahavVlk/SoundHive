@@ -1,5 +1,6 @@
 package com.example.soundhiveapi.config;
 
+import com.example.soundhiveapi.neural.ModelSerializer;
 import com.example.soundhiveapi.neural.NeuralNetwork;
 import com.example.soundhiveapi.repository.TagRepository;
 import com.example.soundhiveapi.repository.SongRepository;
@@ -29,6 +30,16 @@ public class NeuralConfig {
         int[] layerSizes    = new int[]{ numTags, 64, 32, numSongs };
         double learningRate = 0.001;
 
-        return new NeuralNetwork(layerSizes, learningRate);
+        NeuralNetwork net = new NeuralNetwork(layerSizes, learningRate);
+
+        // Try loading saved weights (if the file exists)
+        try {
+            ModelSerializer.loadModel(net);
+            System.out.println("[NeuralConfig] Loaded model weights from file.");
+        } catch (Exception e) {
+            System.out.println("[NeuralConfig] No saved model found or failed to load. Starting fresh.");
+        }
+
+        return net;
     }
 }

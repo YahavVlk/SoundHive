@@ -12,4 +12,5 @@ public interface UserPlayEventRepository extends JpaRepository<UserPlayEvent, Lo
     UserPlayEvent findTop1ByUserIdOrderByPlayTimeDesc(String userId); // 👈 Add this line
     boolean existsByUserId(String userId); // 👈 This is used now
     void deleteByUserId(String userId);
+    List<UserPlayEvent> findAllByUserId(String userId);
 }
