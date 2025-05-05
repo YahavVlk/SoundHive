@@ -1,14 +1,18 @@
 package com.example.soundhiveapi.config;
 
-import com.example.soundhiveapi.neural.ModelSerializer;
-import com.example.soundhiveapi.neural.NeuralNetwork;
+import com.example.soundhiveapi.neural.*;
 import com.example.soundhiveapi.repository.TagRepository;
 import com.example.soundhiveapi.repository.SongRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import java.util.Arrays;
+
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Configuration
-public class NeuralConfig {
+public class NeuralConfig{
 
     private final TagRepository tagRepo;
     private final SongRepository songRepo;
@@ -27,12 +31,14 @@ public class NeuralConfig {
         int numTags  = (int) tagRepo.count();
         int numSongs = (int) songRepo.count();
 
-        int[] layerSizes    = new int[]{ numTags, 64, 32, numSongs };
+        List<Layer> layers = new ArrayList<>();
+        layers.add(new DenseLayer(numTags, 64, ActivationFunction.RELU));
+        layers.add(new DenseLayer(64, 32, ActivationFunction.RELU));
+        layers.add(new DenseLayer(32, numSongs, ActivationFunction.SIGMOID));
+
         double learningRate = 0.001;
+        NeuralNetwork net = new NeuralNetwork(layers, learningRate);
 
-        NeuralNetwork net = new NeuralNetwork(layerSizes, learningRate);
-
-        // Try loading saved weights (if the file exists)
         try {
             ModelSerializer.loadModel(net);
             System.out.println("[NeuralConfig] Loaded model weights from file.");
@@ -40,6 +46,9 @@ public class NeuralConfig {
             System.out.println("[NeuralConfig] No saved model found or failed to load. Starting fresh.");
         }
 
+        System.out.println("[Debug] Biases after loading = " + Arrays.toString(((DenseLayer) net.getLayers().get(0)).getBiases()));
+        net.setEpochs(10); // Adjustable if needed
         return net;
     }
+
 }

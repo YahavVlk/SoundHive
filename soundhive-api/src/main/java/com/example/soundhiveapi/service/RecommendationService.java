@@ -1,11 +1,15 @@
 package com.example.soundhiveapi.service;
 
 import com.example.soundhiveapi.model.Song;
+import com.example.soundhiveapi.model.Tag;
+import com.example.soundhiveapi.model.UserPlayEvent;
 import com.example.soundhiveapi.repository.UserPlayEventRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @Service
 public class RecommendationService {
@@ -14,10 +18,20 @@ public class RecommendationService {
     @Autowired private UserPlayEventRepository playRepo;
 
     private final Set<String> coldStartUsers = new HashSet<>();
+    private final Map<String, Deque<Integer>> sessionHistory = new ConcurrentHashMap<>();
 
-    /**
-     * Recommends a batch of songs to the given user, avoiding recent plays.
-     */
+    public void startSession(String userId) {
+        Deque<Integer> recent = playRepo.findTop20ByUserIdOrderByPlayTimeDesc(userId).stream()
+                .map(UserPlayEvent::getSongId)
+                .limit(10)
+                .collect(Collectors.toCollection(ArrayDeque::new));
+        sessionHistory.put(userId, recent);
+    }
+
+    public void endSession(String userId) {
+        sessionHistory.remove(userId);
+    }
+
     public List<Song> recommend(String userId, int k, Set<Integer> recentlyPlayed) {
         List<Song> recommended;
 
@@ -26,14 +40,21 @@ public class RecommendationService {
         if (isCold) {
             recommended = recommendCollaboratively(userId, k, recentlyPlayed);
             if (recommended.size() < k) {
-                coldStartUsers.remove(userId); // exit cold start if fallback needed
+                coldStartUsers.remove(userId);
                 List<Song> fallback = recommendNeurally(userId, k - recommended.size(), recentlyPlayed, recommended);
                 recommended.addAll(fallback);
             } else {
-                coldStartUsers.add(userId); // still in cold start phase
+                coldStartUsers.add(userId);
             }
         } else {
             recommended = recommendNeurally(userId, k, recentlyPlayed, new ArrayList<>());
+        }
+
+        Deque<Integer> history = sessionHistory.computeIfAbsent(userId, u -> new ArrayDeque<>());
+        for (Song s : recommended) {
+            history.remove(s.getSongId());
+            history.addLast(s.getSongId());
+            if (history.size() > 20) history.pollFirst();
         }
 
         return recommended;
@@ -49,8 +70,11 @@ public class RecommendationService {
         List<Integer> candidates = new ArrayList<>(jdbc.getCollaborativeCandidates(userId));
         Collections.shuffle(candidates);
 
+        Set<Integer> exclude = new HashSet<>(recentlyPlayed);
+        exclude.addAll(sessionHistory.getOrDefault(userId, new ArrayDeque<>()));
+
         for (Integer songId : candidates) {
-            if (recentlyPlayed.contains(songId)) continue;
+            if (exclude.contains(songId)) continue;
             Song s = jdbc.getSongById(songId);
             if (s != null && !containsSong(batch, s.getSongId())) {
                 batch.add(s);
@@ -65,17 +89,50 @@ public class RecommendationService {
         System.out.println("? Recommending using Neural Network");
         List<Song> batch = new ArrayList<>();
 
+        System.out.println("[Debug] Input tag weights for user " + userId + ": " + Arrays.toString(jdbc.getUserTagWeightsArray(userId)));
         double[] scores = jdbc.getPredictedScores(userId);
         List<Integer> allSongIds = jdbc.getDistinctSongIds();
+
         Set<Integer> excluded = new HashSet<>(recentlyPlayed);
         alreadyRecommended.forEach(s -> excluded.add(s.getSongId()));
+        excluded.addAll(sessionHistory.getOrDefault(userId, new ArrayDeque<>()));
 
+        final double rarityWeightFactor = 0.25;
         PriorityQueue<SongScore> heap = new PriorityQueue<>((a, b) -> Double.compare(b.score, a.score));
 
         for (int i = 0; i < allSongIds.size(); i++) {
             int sid = allSongIds.get(i);
             if (excluded.contains(sid)) continue;
-            heap.add(new SongScore(sid, scores[i]));
+            Song song = jdbc.getSongById(sid);
+            if (song == null) continue;
+
+            MyJdbcService.SongWithTags swt = jdbc.getSongWithTags(sid);
+            if (swt == null || swt.tags.isEmpty()) continue;
+
+            List<Tag> songTags = swt.tags;
+            Map<Integer, Double> userWeights = new HashMap<>();
+            for (Tag tag : songTags) {
+                double weight = jdbc.getTagWeightsForUser(userId, Collections.singletonList(tag)).get(0);
+                userWeights.put(tag.getTagId(), weight);
+            }
+
+            Map<Tag, Double> rawMap = jdbc.getTagGlobalPopularity(songTags);
+            Map<Integer, Double> globalPopularity = new HashMap<>();
+            for (Tag tag : songTags) {
+                globalPopularity.put(tag.getTagId(), rawMap.getOrDefault(tag, 0.0));
+            }
+
+            double rarityBonus = 0;
+            for (Tag tag : songTags) {
+                double rarity = globalPopularity.containsKey(tag.getTagId())
+                        ? 1.0 / Math.max(1, globalPopularity.get(tag.getTagId()))
+                        : 0.0;
+                double userWeight = userWeights.getOrDefault(tag.getTagId(), 0.0);
+                rarityBonus += rarity * userWeight;
+            }
+
+            double finalScore = scores[i] + rarityWeightFactor * rarityBonus;
+            heap.add(new SongScore(sid, finalScore));
         }
 
         while (!heap.isEmpty() && batch.size() < k) {
@@ -90,9 +147,14 @@ public class RecommendationService {
     }
 
     private Set<Integer> getRecentPlays(String userId) {
-        List<Integer> list = jdbc.getUserPlayEvents(userId).stream()
-                .map(Song::getSongId).toList();
-        return new HashSet<>(list);
+        List<UserPlayEvent> allEvents = jdbc.getUserPlayHistory(userId);
+        allEvents.sort(Comparator.comparing(UserPlayEvent::getPlayTime).reversed());
+
+        return allEvents.stream()
+                .map(UserPlayEvent::getSongId)
+                .distinct()
+                .limit(20)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     private boolean containsSong(List<Song> list, int songId) {

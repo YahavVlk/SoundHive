@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class MyJdbcService {
@@ -168,7 +169,7 @@ public class MyJdbcService {
         Song song = getSongById(songId);
         if (song == null) return null;
 
-        String raw = song.getRawTags();
+        String raw = song.getTags();
         List<Tag> list = new ArrayList<>();
         if (raw != null && !raw.isEmpty()) {
             String[] parts = raw.split(",");
@@ -210,6 +211,16 @@ public class MyJdbcService {
         return weights;
     }
 
+    public List<Tag> getTop5TagsForUser(String userId) {
+        List<UserTagWeight> weights = userTagWeightRepository.findByIdNumber(userId);
+        weights.sort((a, b) -> Double.compare(b.getWeight(), a.getWeight()));
+        List<Integer> topIds = weights.stream()
+                .limit(5)
+                .map(UserTagWeight::getTagId)
+                .toList();
+        return tagRepository.findAllById(topIds);
+    }
+
     public Map<Integer, String> getSongTitlesMap() {
         String query = "SELECT song_id, title FROM songs";
         Map<Integer, String> map = new HashMap<>();
@@ -249,38 +260,64 @@ public class MyJdbcService {
 
     public Set<Integer> getCollaborativeCandidates(String userId) {
         Set<Integer> result = new HashSet<>();
-        String sql = """
-        SELECT DISTINCT sp.song_id
-        FROM user_playevents sp
-        JOIN (
-            SELECT tag_id
-            FROM user_tagweights
-            WHERE id_number = ?
-            ORDER BY weight DESC
-            LIMIT 5
-        ) AS top_tags ON EXISTS (
-            SELECT 1
-            FROM song_tags st
-            WHERE st.song_id = sp.song_id
-              AND st.tag_id = top_tags.tag_id
-        )
-        WHERE sp.user_id != ?
-        LIMIT 50
-    """;
+        List<Song> songs = songRepository.findAll();
+        List<Tag> userTopTags = getTop5TagsForUser(userId);
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, userId);
-            stmt.setString(2, userId);
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                result.add(rs.getInt("song_id"));
+        for (Song song : songs) {
+            if (song.getTags() == null) continue;
+            String[] rawTags = song.getTags().split(",");
+            Set<String> tagSet = Arrays.stream(rawTags).map(String::trim).collect(Collectors.toSet());
+
+            for (Tag tag : userTopTags) {
+                if (tagSet.contains(tag.getTagName())) {
+                    result.add(song.getSongId());
+                    break;
+                }
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
         }
-
         return result;
     }
 
+    public List<UserPlayEvent> getUserPlayHistory(String userId) {
+        return userPlayEventRepository.findAllByUserId(userId);
+    }
+
+    public Map<Tag, Double> getTagGlobalPopularity(List<Tag> tags) {
+        Map<Tag, Double> map = new HashMap<>();
+        List<Song> allSongs = songRepository.findAll();
+
+        for (Tag tag : tags) {
+            String tagName = tag.getTagName().toLowerCase();
+            double count = 0;
+
+            for (Song song : allSongs) {
+                String raw = song.getTags();
+                if (raw == null) continue;
+                List<String> tagList = Arrays.stream(raw.split(","))
+                        .map(String::trim)
+                        .map(String::toLowerCase)
+                        .collect(Collectors.toList());
+
+                if (tagList.contains(tagName)) {
+                    count++;
+                }
+            }
+
+            map.put(tag, count);
+        }
+
+        return map;
+    }
+
+    public Map<Integer, Integer> getTagFatigue(String userId) {
+        Map<Integer, Integer> map = new HashMap<>();
+        List<UserPlayEvent> plays = getUserPlayHistory(userId);
+        for (UserPlayEvent e : plays) {
+            SongWithTags s = getSongWithTags(e.getSongId());
+            for (Tag t : s.tags) {
+                map.put(t.getTagId(), map.getOrDefault(t.getTagId(), 0) + 1);
+            }
+        }
+        return map;
+    }
 }

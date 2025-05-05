@@ -1,76 +1,77 @@
 package com.example.soundhiveapi.service;
 
+import com.example.soundhiveapi.model.UserPlayEvent;
 import com.example.soundhiveapi.model.Song;
-import com.example.soundhiveapi.neural.ModelSerializer;
-import com.example.soundhiveapi.neural.TrainingExample;
 import com.example.soundhiveapi.neural.NeuralNetwork;
+import com.example.soundhiveapi.neural.TrainingExample;
+import com.example.soundhiveapi.neural.ModelSerializer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class TrainingService {
 
-    @Autowired private MyJdbcService  jdbcService;
-    @Autowired private NeuralNetwork  network;
+    @Autowired private MyJdbcService jdbc;
+    @Autowired private NeuralNetwork neuralNetwork;
 
-    private final int batchSize = 5;
-    private final int epochs    = 1;
+    private final List<TrainingExample> buffer = new ArrayList<>();
+    private static final int BATCH_SIZE = 10;
 
-    public void train() {
-        List<TrainingExample> data = buildTrainingSet();
-        Collections.shuffle(data);
-
-        for (int e = 0; e < epochs; e++) {
-            for (int i = 0; i < data.size(); i += batchSize) {
-                int end = Math.min(i + batchSize, data.size());
-                network.trainOnBatch(data.subList(i, end));
-            }
+    public void trainOnExample(TrainingExample ex) {
+        buffer.add(ex);
+        if (buffer.size() >= BATCH_SIZE) {
+            neuralNetwork.trainBatch(buffer);
+            buffer.clear();
         }
-    }
-
-    public void trainOnExample(TrainingExample example) {
-        network.trainOnBatch(List.of(example));
     }
 
     public void saveModel() {
         try {
-            ModelSerializer.saveModel(network);
-            System.out.println("[Model Saved] Neural network weights saved to disk.");
+            ModelSerializer.saveModel(neuralNetwork);
         } catch (IOException e) {
-            System.err.println("⚠ Error saving model: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
-    private List<TrainingExample> buildTrainingSet() {
-        double[][] matrix     = jdbcService.getUserTagWeightsMatrix();
-        List<String> users    = jdbcService.getDistinctUserIds();
-        List<Integer> songIds = jdbcService.getDistinctSongIds();
-        int numSongs          = songIds.size();
+    public void train() {
+        if (!buffer.isEmpty()) {
+            neuralNetwork.trainBatch(buffer);
+            buffer.clear();
+        }
+        saveModel();
+    }
 
-        List<TrainingExample> examples = new ArrayList<>();
+    public String evaluatePredictionAccuracy(String userId) {
+        Set<Integer> history = jdbc.getUserPlayHistory(userId).stream()
+                .map(UserPlayEvent::getSongId)
+                .collect(Collectors.toSet());
 
-        for (int u = 0; u < users.size(); u++) {
-            String userId    = users.get(u);
-            double[] x       = matrix[u];
-            double[] y       = new double[numSongs];
+        double[] input = jdbc.getUserTagWeightsArray(userId);
+        double[] predictions = neuralNetwork.predict(input);
+        List<Integer> songIds = jdbc.getDistinctSongIds();
 
-            Queue<Song> played = jdbcService.getUserPlayEvents(userId);
-            for (Song s : played) {
-                int songId = s.getSongId();
-                for (int idx = 0; idx < numSongs; idx++) {
-                    if (songIds.get(idx) == songId) {
-                        y[idx] = 1.0;
-                        break;
-                    }
-                }
-            }
+        // Rank by predicted score
+        List<Integer> ranked = new ArrayList<>(songIds);
+        ranked.sort((a, b) -> Double.compare(
+                predictions[songIds.indexOf(b)],
+                predictions[songIds.indexOf(a)]));
 
-            examples.add(new TrainingExample(x, y));
+        // Print top 20 predicted songs
+        System.out.println("\n🎵 Top 20 predicted songs:");
+        for (int i = 0; i < Math.min(20, ranked.size()); i++) {
+            int songId = ranked.get(i);
+            String title = jdbc.getSongTitle(songId);
+            double score = predictions[songIds.indexOf(songId)];
+            boolean inHistory = history.contains(songId);
+            System.out.printf("%2d. %s (%.3f)%s%n", i + 1, title, score, inHistory ? " ✅" : "");
         }
 
-        return examples;
+        long correct = ranked.stream().limit(20).filter(history::contains).count();
+        double accuracy = correct / 20.0;
+        return String.format("🎯 Accuracy for %s: %.2f%%", userId, accuracy * 100);
     }
 }

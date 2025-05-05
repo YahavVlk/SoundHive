@@ -1,6 +1,8 @@
 package com.example.soundhiveapi.model;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.CreationTimestamp;
+
 import java.sql.Timestamp;
 
 @Entity
@@ -17,7 +19,8 @@ public class UserPlayEvent {
     private int songId;
 
     @Id
-    @Column(name = "play_time")
+    @CreationTimestamp
+    @Column(name = "play_time", updatable = false)
     private Timestamp playTime;
 
     @Column(name = "song_title")
@@ -25,10 +28,9 @@ public class UserPlayEvent {
 
     public UserPlayEvent() {}
 
-    public UserPlayEvent(String userId, int songId, Timestamp playTime, String songTitle) {
+    public UserPlayEvent(String userId, int songId, String songTitle) {
         this.userId = userId;
         this.songId = songId;
-        this.playTime = playTime;
         this.songTitle = songTitle;
     }
 
@@ -52,15 +54,15 @@ public class UserPlayEvent {
         return playTime;
     }
 
-    public void setPlayTime(Timestamp playTime) {
-        this.playTime = playTime;
-    }
-
     public String getSongTitle() {
         return songTitle;
     }
 
     public void setSongTitle(String songTitle) {
         this.songTitle = songTitle;
+    }
+
+    public void setPlayTime(Timestamp playTime) {
+        this.playTime = playTime;
     }
 }

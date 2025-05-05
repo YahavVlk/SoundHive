@@ -14,7 +14,7 @@ public class Song {
     private String artist;
 
     @Column(name = "tags")
-    private String rawTags;
+    private String Tags;
 
     private long songLength;  // in milliseconds
 
@@ -44,12 +44,12 @@ public class Song {
         this.artist = artist;
     }
 
-    public String getRawTags() {
-        return rawTags;
+    public String getTags() {
+        return Tags;
     }
 
-    public void setRawTags(String rawTags) {
-        this.rawTags = rawTags;
+    public void setTags(String Tags) {
+        this.Tags = Tags;
     }
 
     public long getSongLength() {

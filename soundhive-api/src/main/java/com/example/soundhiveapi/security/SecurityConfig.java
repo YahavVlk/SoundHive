@@ -33,7 +33,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/**",          // ✅ all auth endpoints
                                 "/api/tags",             // ✅ allow tag retrieval
-                                "/api/reset-password"    // ✅ allow resets
+                                "/api/reset-password",    // ✅ allow resets
+                                "/api/train/**"             // ✅ allow training
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

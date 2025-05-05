@@ -13,4 +13,6 @@ public interface UserPlayEventRepository extends JpaRepository<UserPlayEvent, Lo
     boolean existsByUserId(String userId); // 👈 This is used now
     void deleteByUserId(String userId);
     List<UserPlayEvent> findAllByUserId(String userId);
+
+    void deleteByUserIdAndSongId(String userId, int songId);
 }

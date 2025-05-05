@@ -80,39 +80,22 @@ public class FeatureUpdateService {
         playCache.putIfAbsent(userId, new ArrayDeque<>());
         Deque<Integer> q = playCache.get(userId);
 
-        List<UserPlayEvent> existing = playRepo.findAllByUserId(userId);
-        Set<Integer> existingSongIds = existing.stream()
-                .map(UserPlayEvent::getSongId)
-                .collect(Collectors.toSet());
-
-        if (existingSongIds.contains(songId)) {
-            existing.stream()
-                    .filter(e -> e.getSongId() == songId)
-                    .findFirst()
-                    .ifPresent(playRepo::delete);
-            q.remove(songId);
-        }
-
-        if (q.size() == MAX_EVENTS) {
-            Integer oldest = q.pollFirst();
-            existing.stream()
-                    .filter(e -> e.getSongId() == oldest)
-                    .findFirst()
-                    .ifPresent(playRepo::delete);
-        }
-
         q.addLast(songId);
 
         UserPlayEvent ev = new UserPlayEvent();
         ev.setUserId(userId);
         ev.setSongId(songId);
+        ev.setPlayTime(new Timestamp(System.currentTimeMillis()));
         ev.setSongTitle(jdbc.getSongTitle(songId));
-
-        long offset = q.size();
-        long millisOffset = offset * 1000L + new Random().nextInt(1000);
-        ev.setPlayTime(new Timestamp(System.currentTimeMillis() + millisOffset));
-
         playRepo.save(ev);
+
+        // Limit DB to last 20 songs
+        List<UserPlayEvent> events = playRepo.findAllByUserId(userId);
+        if (events.size() > MAX_EVENTS) {
+            events.sort(Comparator.comparing(UserPlayEvent::getPlayTime));
+            List<UserPlayEvent> toDelete = events.subList(0, events.size() - MAX_EVENTS);
+            playRepo.deleteAll(toDelete);
+        }
     }
 
     private UserTagWeight getOrCreateWeight(String userId, int tagId) {

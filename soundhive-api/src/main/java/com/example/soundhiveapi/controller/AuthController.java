@@ -130,7 +130,7 @@ public class AuthController {
         List<Tag> allTags = tagRepository.findAllByOrderByTagIdAsc();
         List<UserTagWeight> weights = new ArrayList<>(allTags.size());
         for (Tag t : allTags) {
-            double w = req.selectedTagIds.contains(t.getTagId()) ? 0.5 : 0.2;
+            double w = req.selectedTagIds.contains(t.getTagId()) ? 1.0 : 0.05;
             weights.add(new UserTagWeight(u.getIdNumber(), t.getTagId(), w));
         }
         userTagWeightRepository.saveAll(weights);

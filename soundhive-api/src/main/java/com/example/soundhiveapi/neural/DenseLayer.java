@@ -98,4 +98,17 @@ public class DenseLayer implements Layer {
         return biases;
     }
 
+    public void applyGradients(LayerGradients grads, double learningRate) {
+        double[][] dW = grads.dW;
+        double[] dB = grads.dB;
+        for (int i = 0; i < inputSize; i++) {
+            for (int j = 0; j < outputSize; j++) {
+                weights[i][j] -= learningRate * dW[i][j];
+            }
+        }
+        for (int j = 0; j < outputSize; j++) {
+            biases[j] -= learningRate * dB[j];
+        }
+    }
+
 }

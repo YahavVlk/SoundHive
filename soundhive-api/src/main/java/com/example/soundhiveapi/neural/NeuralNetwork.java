@@ -1,123 +1,116 @@
 package com.example.soundhiveapi.neural;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
-/**
- * Orchestrates layers, forward pass, mini‑batch training, and prediction.
- */
 public class NeuralNetwork {
-    private final List<Layer> layers = new ArrayList<>();
-    private final Optimizer optimizer;
+    private final List<Layer> layers;
+    private double learningRate;
+    private int epochs = 10; // Number of epochs per batch
 
-    public NeuralNetwork(int[] layerSizes, double learningRate) {
-        // build hidden layers with ReLU; last layer with Sigmoid
-        for (int i = 0; i < layerSizes.length - 1; i++) {
-            ActivationFunction act = (i < layerSizes.length - 2)
-                    ? ActivationFunction.RELU
-                    : ActivationFunction.SIGMOID;
-            layers.add(new DenseLayer(layerSizes[i], layerSizes[i + 1], act));
-        }
-        this.optimizer = new AdamOptimizer(learningRate);
+    public NeuralNetwork(List<Layer> layers, double learningRate) {
+        this.layers = layers;
+        this.learningRate = learningRate;
     }
 
-    /** Forward propagate input through all layers. */
-    public double[] forward(double[] x) {
-        double[] a = x;
+    public double[] predict(double[] input) {
+        double[] output = input;
         for (Layer layer : layers) {
-            a = layer.forward(a);
+            output = layer.forward(output);
         }
-        return a;
+        return output;
     }
 
-    /** Predict scores (no training). */
-    public double[] predict(double[] x) {
-        return forward(x);
-    }
+    public void trainBatch(List<TrainingExample> batch) {
+        if (batch.isEmpty()) return;
 
-    /** Train on one mini‑batch of examples. */
-    public void trainOnBatch(List<TrainingExample> batch) {
-        int m = batch.size();
-        List<LayerGradients> sumGrads = initZeroGradients();
+        for (int epoch = 0; epoch < epochs; epoch++) {
+            System.out.println("Epoch " + (epoch + 1) + "/" + epochs);
 
-        for (TrainingExample ex : batch) {
-            double[] yPred = forward(ex.x);
-            double[] dA = Loss.crossEntropyDerivative(yPred, ex.y);
-            List<LayerGradients> grads = backwardAll(dA);
-            accumulateGradients(sumGrads, grads);
-        }
+            int inputSize = batch.get(0).x.length;
+            int outputSize = ((DenseLayer) layers.get(layers.size() - 1)).getOutputSize();
 
-        averageGradients(sumGrads, m);
-        optimizer.applyGradients(layers, sumGrads);
-    }
+            List<LayerGradients> accumulated = new ArrayList<>();
+            for (Layer layer : layers) {
+                int in = ((DenseLayer) layer).getInputSize();
+                int out = ((DenseLayer) layer).getOutputSize();
+                accumulated.add(new LayerGradients(new double[in][out], new double[out], new double[in]));
+            }
 
-    /** Train on a single example (convenience wrapper). */
-    public void trainOnExample(TrainingExample example) {
-        trainOnBatch(List.of(example));
-    }
+            for (TrainingExample example : batch) {
+                System.out.println("🧠 Training Input (tag weights): " + Arrays.toString(example.x));
+                System.out.println("🎯 Target Output (sparse): " + example.ySparse);
 
-    // ─── Helper methods ───────────────────────────────────────────────────────
+                double[] output = predict(example.x);
 
-    private List<LayerGradients> backwardAll(double[] dA) {
-        List<LayerGradients> grads = new ArrayList<>();
-        double[] currentDA = dA;
+                double[] dLoss = new double[outputSize];
+                for (Map.Entry<Integer, Double> entry : example.ySparse.entrySet()) {
+                    int songIdIndex = entry.getKey();
+                    double target = entry.getValue();
+                    dLoss[songIdIndex] = output[songIdIndex] - target;
+                }
 
-        for (int i = layers.size() - 1; i >= 0; i--) {
-            Layer layer = layers.get(i);
-            LayerGradients layerG = layer.backward(currentDA);
-            grads.add(0, layerG);
-            currentDA = layerG.dAprev;
-        }
+                List<LayerGradients> grads = new ArrayList<>();
+                double[] grad = dLoss;
+                for (int i = layers.size() - 1; i >= 0; i--) {
+                    Layer layer = layers.get(i);
+                    LayerGradients g = layer.backward(grad);
+                    grads.add(0, g);
+                    grad = g.dAprev;
+                }
 
-        return grads;
-    }
-
-    private List<LayerGradients> initZeroGradients() {
-        List<LayerGradients> zeroList = new ArrayList<>();
-        for (Layer layer : layers) {
-            DenseLayer d = (DenseLayer) layer;
-            int inSize = d.getInputSize();
-            int outSize = d.getOutputSize();
-            zeroList.add(new LayerGradients(
-                    new double[inSize][outSize],
-                    new double[outSize],
-                    new double[inSize]
-            ));
-        }
-        return zeroList;
-    }
-
-    private void accumulateGradients(List<LayerGradients> sum, List<LayerGradients> batchGrads) {
-        for (int i = 0; i < sum.size(); i++) {
-            LayerGradients s = sum.get(i);
-            LayerGradients g = batchGrads.get(i);
-
-            for (int r = 0; r < s.dW.length; r++) {
-                for (int c = 0; c < s.dW[0].length; c++) {
-                    s.dW[r][c] += g.dW[r][c];
+                for (int i = 0; i < grads.size(); i++) {
+                    LayerGradients g = grads.get(i);
+                    LayerGradients acc = accumulated.get(i);
+                    for (int j = 0; j < g.dW.length; j++) {
+                        for (int k = 0; k < g.dW[0].length; k++) {
+                            acc.dW[j][k] += g.dW[j][k];
+                        }
+                    }
+                    for (int k = 0; k < g.dB.length; k++) {
+                        acc.dB[k] += g.dB[k];
+                    }
                 }
             }
-            for (int j = 0; j < s.dB.length; j++) {
-                s.dB[j] += g.dB[j];
+
+            for (int i = 0; i < layers.size(); i++) {
+                DenseLayer layer = (DenseLayer) layers.get(i);
+                LayerGradients g = accumulated.get(i);
+                for (int j = 0; j < g.dW.length; j++) {
+                    for (int k = 0; k < g.dW[0].length; k++) {
+                        layer.getWeights()[j][k] -= learningRate * g.dW[j][k] / batch.size();
+                    }
+                }
+                for (int k = 0; k < g.dB.length; k++) {
+                    layer.getBiases()[k] -= learningRate * g.dB[k] / batch.size();
+                }
             }
+        }
+
+        System.out.println("After training: First weight = " + ((DenseLayer) layers.get(0)).getWeights()[0][0]);
+        System.out.println("[NeuralNetwork] Batch training complete.\n");
+    }
+
+    public void saveModel() {
+        try {
+            ModelSerializer.saveModel(this);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
-    private void averageGradients(List<LayerGradients> sum, int m) {
-        for (LayerGradients s : sum) {
-            for (int r = 0; r < s.dW.length; r++) {
-                for (int c = 0; c < s.dW[0].length; c++) {
-                    s.dW[r][c] /= m;
-                }
-            }
-            for (int j = 0; j < s.dB.length; j++) {
-                s.dB[j] /= m;
-            }
-        }
+    public double getLearningRate() {
+        return learningRate;
+    }
+
+    public void setLearningRate(double learningRate) {
+        this.learningRate = learningRate;
+    }
+
+    public void setEpochs(int epochs) {
+        this.epochs = epochs;
     }
 
     public List<Layer> getLayers() {
-        return Collections.unmodifiableList(layers);
+        return layers;
     }
 }

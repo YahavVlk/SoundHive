@@ -18,4 +18,6 @@ public interface Layer {
      * @return gradients container
      */
     LayerGradients backward(double[] dA);
+
+    void applyGradients(LayerGradients grads, double learningRate);
 }
