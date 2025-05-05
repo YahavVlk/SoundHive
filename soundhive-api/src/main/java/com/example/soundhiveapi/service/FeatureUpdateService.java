@@ -90,6 +90,7 @@ public class FeatureUpdateService {
         playRepo.save(ev);
 
         // Limit DB to last 20 songs
+        // Limit DB to last 20 songs
         List<UserPlayEvent> events = playRepo.findAllByUserId(userId);
         if (events.size() > MAX_EVENTS) {
             events.sort(Comparator.comparing(UserPlayEvent::getPlayTime));

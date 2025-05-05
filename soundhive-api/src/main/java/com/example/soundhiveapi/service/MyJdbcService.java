@@ -26,8 +26,7 @@ public class MyJdbcService {
     @Autowired private UserTagWeightRepository userTagWeightRepository;
     @Autowired private UserPlayEventRepository userPlayEventRepository;
     @Autowired private NeuralNetwork neuralNetwork;
-
-    private final Map<Integer, Integer> songIndexCache = new HashMap<>();
+    @Autowired private SongRepository songRepo;
 
     public User getUserByEmail(String email) {
         return userRepository.findByEmail(email);
@@ -111,11 +110,7 @@ public class MyJdbcService {
     public List<Integer> getDistinctSongIds() {
         List<Song> songs = songRepository.findAll();
         List<Integer> ids = new ArrayList<>();
-        for (int s = 0; s < songs.size(); s++) {
-            int id = songs.get(s).getSongId();
-            ids.add(id);
-            songIndexCache.putIfAbsent(id, s);
-        }
+        for (Song s : songs) ids.add(s.getSongId());
         return ids;
     }
 
@@ -136,24 +131,23 @@ public class MyJdbcService {
 
     public double getPredictedScore(String userId, int songId) {
         double[] input = getUserTagWeightsArray(userId);
+        List<Integer> songIds = getDistinctSongIds();
+        neuralNetwork.setSongIdOrder(songIds);
         double[] predictions = neuralNetwork.predict(input);
-        Integer idx = songIndexCache.get(songId);
-        if (idx == null) {
-            List<Integer> all = getDistinctSongIds();
-            idx = all.indexOf(songId);
-            if (idx != -1) songIndexCache.put(songId, idx);
-        }
-        return idx != null && idx >= 0 && idx < predictions.length ? predictions[idx] : 0.0;
+        int index = songIds.indexOf(songId);
+        return index >= 0 && index < predictions.length ? predictions[index] : 0.0;
     }
 
     public double[] getPredictedScores(String userId) {
         double[] input = getUserTagWeightsArray(userId);
+        List<Integer> songIds = getDistinctSongIds();
+        neuralNetwork.setSongIdOrder(songIds);
         return neuralNetwork.predict(input);
     }
 
     public Map<Integer, Double> getPredictedScoreMap(String userId) {
         double[] scores = getPredictedScores(userId);
-        List<Integer> songIds = getDistinctSongIds();
+        List<Integer> songIds = neuralNetwork.getSongIdOrder();
         Map<Integer, Double> map = new HashMap<>();
         for (int i = 0; i < songIds.size(); i++) {
             map.put(songIds.get(i), scores[i]);
@@ -320,4 +314,34 @@ public class MyJdbcService {
         }
         return map;
     }
+
+    public Song getNextRecommendedSong(String userId) {
+        List<Integer> recentSongIds = getRecentSongIds(userId);
+        List<Song> allSongs = songRepo.findAll();
+
+        for (Song song : allSongs) {
+            if (!recentSongIds.contains(song.getSongId())) {
+                return song;
+            }
+        }
+        return allSongs.isEmpty() ? null : allSongs.get(0);
+    }
+
+    public List<Integer> getRecentSongIds(String userId) {
+        String query = "SELECT song_id FROM user_playevents WHERE user_id = ? ORDER BY timestamp DESC LIMIT 10";
+        List<Integer> songIds = new ArrayList<>();
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement stmt = connection.prepareStatement(query)) {
+            stmt.setString(1, userId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    songIds.add(rs.getInt("song_id"));
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return songIds;
+    }
+
 }

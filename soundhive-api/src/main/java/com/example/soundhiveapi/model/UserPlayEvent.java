@@ -28,11 +28,14 @@ public class UserPlayEvent {
 
     public UserPlayEvent() {}
 
+    // Constructor used for inserting play events
     public UserPlayEvent(String userId, int songId, String songTitle) {
         this.userId = userId;
         this.songId = songId;
         this.songTitle = songTitle;
     }
+
+    // Getters and Setters
 
     public String getUserId() {
         return userId;
@@ -54,15 +57,15 @@ public class UserPlayEvent {
         return playTime;
     }
 
+    public void setPlayTime(Timestamp playTime) {
+        this.playTime = playTime;
+    }
+
     public String getSongTitle() {
         return songTitle;
     }
 
     public void setSongTitle(String songTitle) {
         this.songTitle = songTitle;
-    }
-
-    public void setPlayTime(Timestamp playTime) {
-        this.playTime = playTime;
     }
 }

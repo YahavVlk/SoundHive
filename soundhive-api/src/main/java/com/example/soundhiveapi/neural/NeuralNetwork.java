@@ -5,11 +5,17 @@ import java.util.*;
 public class NeuralNetwork {
     private final List<Layer> layers;
     private double learningRate;
-    private int epochs = 10; // Number of epochs per batch
+    private int epochs = 10;
+
+    private List<Integer> songIdOrder = new ArrayList<>(); // NEW
 
     public NeuralNetwork(List<Layer> layers, double learningRate) {
         this.layers = layers;
         this.learningRate = learningRate;
+    }
+
+    public void setSongIdOrder(List<Integer> songIds) {
+        this.songIdOrder = new ArrayList<>(songIds);
     }
 
     public double[] predict(double[] input) {
@@ -44,9 +50,11 @@ public class NeuralNetwork {
 
                 double[] dLoss = new double[outputSize];
                 for (Map.Entry<Integer, Double> entry : example.ySparse.entrySet()) {
-                    int songIdIndex = entry.getKey();
-                    double target = entry.getValue();
-                    dLoss[songIdIndex] = output[songIdIndex] - target;
+                    int songId = entry.getKey();
+                    int songIndex = songIdOrder.indexOf(songId);
+                    if (songIndex >= 0 && songIndex < dLoss.length) {
+                        dLoss[songIndex] = output[songIndex] - entry.getValue();
+                    }
                 }
 
                 List<LayerGradients> grads = new ArrayList<>();
@@ -112,5 +120,9 @@ public class NeuralNetwork {
 
     public List<Layer> getLayers() {
         return layers;
+    }
+
+    public List<Integer> getSongIdOrder() {
+        return songIdOrder;
     }
 }

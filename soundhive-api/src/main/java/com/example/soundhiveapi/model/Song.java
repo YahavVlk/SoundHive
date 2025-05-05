@@ -59,4 +59,8 @@ public class Song {
     public void setSongLength(long songLength) {
         this.songLength = songLength;
     }
+
+    public long getDuration() {
+        return songLength;
+    }
 }

@@ -24,6 +24,7 @@ public class TrainingService {
     public void trainOnExample(TrainingExample ex) {
         buffer.add(ex);
         if (buffer.size() >= BATCH_SIZE) {
+            neuralNetwork.setSongIdOrder(jdbc.getDistinctSongIds());
             neuralNetwork.trainBatch(buffer);
             buffer.clear();
         }
@@ -38,6 +39,8 @@ public class TrainingService {
     }
 
     public void train() {
+        neuralNetwork.setSongIdOrder(jdbc.getDistinctSongIds());
+
         if (!buffer.isEmpty()) {
             neuralNetwork.trainBatch(buffer);
             buffer.clear();
@@ -46,13 +49,15 @@ public class TrainingService {
     }
 
     public String evaluatePredictionAccuracy(String userId) {
+        List<Integer> songIds = jdbc.getDistinctSongIds();
+        neuralNetwork.setSongIdOrder(songIds); // Ensure song index alignment
+
         Set<Integer> history = jdbc.getUserPlayHistory(userId).stream()
                 .map(UserPlayEvent::getSongId)
                 .collect(Collectors.toSet());
 
         double[] input = jdbc.getUserTagWeightsArray(userId);
         double[] predictions = neuralNetwork.predict(input);
-        List<Integer> songIds = jdbc.getDistinctSongIds();
 
         // Rank by predicted score
         List<Integer> ranked = new ArrayList<>(songIds);
@@ -74,4 +79,5 @@ public class TrainingService {
         double accuracy = correct / 20.0;
         return String.format("🎯 Accuracy for %s: %.2f%%", userId, accuracy * 100);
     }
+
 }

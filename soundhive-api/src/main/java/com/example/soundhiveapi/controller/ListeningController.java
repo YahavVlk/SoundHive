@@ -25,7 +25,6 @@ public class ListeningController {
     @PostMapping("/start")
     public ResponseEntity<String> startListening(
             @RequestParam(defaultValue = "simulation") String mode,
-            @RequestParam(defaultValue = "0.2") double interval,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         String email = userDetails.getUsername();
@@ -35,7 +34,7 @@ public class ListeningController {
         if (mode.equalsIgnoreCase("manual")) {
             return ResponseEntity.ok("Manual mode initialized for user: " + idNumber);
         } else {
-            new Thread(() -> listeningService.startSimulation(idNumber, interval)).start();
+            new Thread(() -> listeningService.startSimulation(idNumber)).start();
             return ResponseEntity.ok("Simulation started for user: " + idNumber);
         }
     }
@@ -49,7 +48,7 @@ public class ListeningController {
         User user = jdbcService.getUserByEmail(email);
         String idNumber = user.getIdNumber();
 
-        listeningService.stopListening(idNumber);
+        listeningService.stopSimulation(idNumber);
         trainingService.saveModel();
         return ResponseEntity.ok("Stopped listening and saved model.");
     }
