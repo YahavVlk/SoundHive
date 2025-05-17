@@ -4,6 +4,7 @@ import com.example.soundhiveapi.dto.SongDTO;
 import com.example.soundhiveapi.model.Song;
 import com.example.soundhiveapi.model.Tag;
 import com.example.soundhiveapi.model.UserPlayEvent;
+import com.example.soundhiveapi.service.FeatureUpdateService;
 import com.example.soundhiveapi.service.MyJdbcService;
 import com.example.soundhiveapi.service.RecommendationService;
 import com.example.soundhiveapi.service.MyJdbcService.SongWithTags;
@@ -13,16 +14,19 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api")
 public class RecommendationController {
 
     @Autowired private RecommendationService recService;
-    @Autowired private MyJdbcService         jdbcService;
+    @Autowired private MyJdbcService jdbcService;
+    @Autowired private FeatureUpdateService featureUpdateService;
     @Autowired private UserPlayEventRepository playRepo;
 
     private final Map<String, Deque<Song>> userQueues = new HashMap<>();
+
     private static final int QUEUE_SIZE = 10;
     private static final int REFILL_THRESHOLD = 5;
 
@@ -34,19 +38,17 @@ public class RecommendationController {
         userQueues.putIfAbsent(userId, new ArrayDeque<>());
         Deque<Song> queue = userQueues.get(userId);
 
-        // Maintain recently played set to avoid repeats
         Set<Integer> recentlyPlayed = new HashSet<>();
-        List<UserPlayEvent> history = playRepo.findTop20ByUserIdOrderByPlayTimeDesc(userId);
+        List<UserPlayEvent> history = playRepo.findTop20ByIdUserIdOrderByIdPlayTimeDesc(userId);
         history.forEach(e -> recentlyPlayed.add(e.getSongId()));
 
-        // refill queue if needed
         if (queue.size() <= REFILL_THRESHOLD) {
             List<Song> batch = recService.recommend(userId, QUEUE_SIZE, recentlyPlayed);
             queue.addAll(batch);
         }
 
-        // collect next K songs from queue
         List<SongDTO> dtos = new ArrayList<>();
+
         for (int i = 0; i < k && !queue.isEmpty(); i++) {
             Song song = queue.pollFirst();
             if (song == null) continue;
@@ -54,8 +56,18 @@ public class RecommendationController {
             SongWithTags swt = jdbcService.getSongWithTags(song.getSongId());
             if (swt == null) continue;
 
-            List<String> tagNames = new ArrayList<>();
-            for (Tag t : swt.tags) tagNames.add(t.getTagName());
+            // Record play and update tag weights
+            featureUpdateService.recordFeedback(
+                    userId,
+                    swt.song.getSongId(),
+                    swt.song.getSongLength(),
+                    true,
+                    false
+            );
+
+            List<String> tagNames = swt.tags.stream()
+                    .map(Tag::getTagName)
+                    .collect(Collectors.toList());
 
             dtos.add(new SongDTO(
                     swt.song.getSongId(),

@@ -3,22 +3,22 @@ package com.example.soundhiveapi.model;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "songs")
+@Table(name = "songs") // Maps this class to the "songs" table in the database
 public class Song {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY) // Auto-increment primary key
     private int songId;
 
-    private String title;
-    private String artist;
+    private String title;   // Song title
+    private String artist;  // Artist name
 
     @Column(name = "tags")
-    private String Tags;
+    private String Tags;    // Comma-separated tag names as a string
 
-    private long songLength;  // in milliseconds
+    private long songLength;  // Song duration in milliseconds
 
-    // Getters and Setters
+    // --- Getters and Setters ---
 
     public int getSongId() {
         return songId;
@@ -60,6 +60,7 @@ public class Song {
         this.songLength = songLength;
     }
 
+    // Alias method (identical to getSongLength)
     public long getDuration() {
         return songLength;
     }

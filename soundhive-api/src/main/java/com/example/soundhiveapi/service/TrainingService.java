@@ -15,12 +15,18 @@ import java.util.stream.Collectors;
 @Service
 public class TrainingService {
 
-    @Autowired private MyJdbcService jdbc;
-    @Autowired private NeuralNetwork neuralNetwork;
+    @Autowired
+    private MyJdbcService jdbc;
+    @Autowired
+    private NeuralNetwork neuralNetwork;
 
-    private final List<TrainingExample> buffer = new ArrayList<>();
+    private final List<TrainingExample> buffer = new ArrayList<>(); // Buffer of examples for batch training
     private static final int BATCH_SIZE = 10;
 
+    /**
+     * Add a single training example to the buffer.
+     * When the buffer reaches BATCH_SIZE, train the network on the batch.
+     */
     public void trainOnExample(TrainingExample ex) {
         buffer.add(ex);
         if (buffer.size() >= BATCH_SIZE) {
@@ -30,6 +36,9 @@ public class TrainingService {
         }
     }
 
+    /**
+     * Save the current state of the neural network to disk (model.dat).
+     */
     public void saveModel() {
         try {
             ModelSerializer.saveModel(neuralNetwork);
@@ -38,6 +47,10 @@ public class TrainingService {
         }
     }
 
+    /**
+     * Manually trigger training using the buffered examples.
+     * Also clears the buffer and saves the model afterward.
+     */
     public void train() {
         neuralNetwork.setSongIdOrder(jdbc.getDistinctSongIds());
 
@@ -48,24 +61,30 @@ public class TrainingService {
         saveModel();
     }
 
+    /**
+     * Evaluate the prediction accuracy for a specific user.
+     * Compares the top 20 predicted songs to the user's listening history.
+     */
     public String evaluatePredictionAccuracy(String userId) {
         List<Integer> songIds = jdbc.getDistinctSongIds();
-        neuralNetwork.setSongIdOrder(songIds); // Ensure song index alignment
+        neuralNetwork.setSongIdOrder(songIds); // Ensure output alignment
 
+        // Get actual songs the user has listened to
         Set<Integer> history = jdbc.getUserPlayHistory(userId).stream()
                 .map(UserPlayEvent::getSongId)
                 .collect(Collectors.toSet());
 
-        double[] input = jdbc.getUserTagWeightsArray(userId);
-        double[] predictions = neuralNetwork.predict(input);
+        // Generate prediction scores from the model
+        double[] input = jdbc.getUserTagWeightsArray(userId); // tag weight vector
+        double[] predictions = neuralNetwork.predict(input);  // predicted song scores
 
-        // Rank by predicted score
+        // Sort song IDs by predicted score descending
         List<Integer> ranked = new ArrayList<>(songIds);
         ranked.sort((a, b) -> Double.compare(
                 predictions[songIds.indexOf(b)],
                 predictions[songIds.indexOf(a)]));
 
-        // Print top 20 predicted songs
+        // Output top 20 predictions
         System.out.println("\n🎵 Top 20 predicted songs:");
         for (int i = 0; i < Math.min(20, ranked.size()); i++) {
             int songId = ranked.get(i);
@@ -75,9 +94,9 @@ public class TrainingService {
             System.out.printf("%2d. %s (%.3f)%s%n", i + 1, title, score, inHistory ? " ✅" : "");
         }
 
+        // Calculate accuracy as overlap with listening history
         long correct = ranked.stream().limit(20).filter(history::contains).count();
         double accuracy = correct / 20.0;
         return String.format("🎯 Accuracy for %s: %.2f%%", userId, accuracy * 100);
     }
-
 }

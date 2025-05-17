@@ -45,7 +45,7 @@ public class MyJdbcService {
     }
 
     public Queue<Song> getUserPlayEvents(String userId) {
-        List<UserPlayEvent> events = userPlayEventRepository.findTop20ByUserIdOrderByPlayTimeDesc(userId);
+        List<UserPlayEvent> events = userPlayEventRepository.findTop20ByIdUserIdOrderByIdPlayTimeDesc(userId);
         Queue<Song> queue = new LinkedList<>();
         for (UserPlayEvent e : events) {
             Song s = getSongById(e.getSongId());
@@ -273,7 +273,7 @@ public class MyJdbcService {
     }
 
     public List<UserPlayEvent> getUserPlayHistory(String userId) {
-        return userPlayEventRepository.findAllByUserId(userId);
+        return userPlayEventRepository.findAllByIdUserId(userId);
     }
 
     public Map<Tag, Double> getTagGlobalPopularity(List<Tag> tags) {
@@ -328,7 +328,7 @@ public class MyJdbcService {
     }
 
     public List<Integer> getRecentSongIds(String userId) {
-        String query = "SELECT song_id FROM user_playevents WHERE user_id = ? ORDER BY timestamp DESC LIMIT 10";
+        String query = "SELECT song_id FROM user_playevents WHERE user_id = ? ORDER BY play_time DESC LIMIT 10";
         List<Integer> songIds = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
              PreparedStatement stmt = connection.prepareStatement(query)) {
@@ -344,4 +344,12 @@ public class MyJdbcService {
         return songIds;
     }
 
+    public Map<Integer, Double> getUserTagWeightMap(String userId) {
+        List<UserTagWeight> weights = userTagWeightRepository.findByIdNumber(userId);
+        Map<Integer, Double> map = new HashMap<>();
+        for (UserTagWeight w : weights) {
+            map.put(w.getTagId(), w.getWeight());
+        }
+        return map;
+    }
 }

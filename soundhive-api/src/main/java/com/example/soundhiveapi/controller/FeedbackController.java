@@ -11,14 +11,15 @@ public class FeedbackController {
 
     @Autowired private FeatureUpdateService featureUpdateService;
 
+    // Request body structure for feedback submission
     public static class FeedbackRequest {
-        public String  userId;
-        public int     songId;
-        public long    timestamp;     // ms since song start
-        public boolean isFavorite;    // true if user “hearted” it
+        public String  userId;      // ID of the user submitting feedback
+        public int     songId;      // ID of the song
+        public long    timestamp;   // Time listened in milliseconds (from start of song)
+        public boolean isFavorite;  // Whether the song was liked/favorited
     }
 
-    // POST /api/feedback
+    // Endpoint to receive feedback manually from user (e.g., liking a song or skipping)
     @PostMapping("/feedback")
     public ResponseEntity<String> receiveFeedback(@RequestBody FeedbackRequest req) {
         featureUpdateService.recordFeedback(
@@ -26,8 +27,8 @@ public class FeedbackController {
                 req.songId,
                 req.timestamp,
                 req.isFavorite,
-                false // manually submitted feedback is never an unfavorite
+                false // manually submitted feedback is never an "unfavorite"
         );
-        return ResponseEntity.ok("Feedback recorded");
+        return ResponseEntity.ok("Feedback recorded"); // Simple confirmation response
     }
 }

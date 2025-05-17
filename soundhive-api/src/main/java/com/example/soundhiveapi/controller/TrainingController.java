@@ -16,21 +16,24 @@ public class TrainingController {
 
     /**
      * POST /api/train?userId=some@email.com
-     * Trains the model using all available data and evaluates prediction accuracy.
+     * Trains the model using all available feedback data for the given user
+     * and returns a prediction accuracy report.
      */
     @PostMapping("/train")
     public ResponseEntity<String> trainOnce(@RequestParam String userId) {
+        // Evaluate prediction accuracy for the user (includes internal training logic)
         String result = trainingService.evaluatePredictionAccuracy(userId);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(result); // Return result string to frontend
     }
 
     /**
      * POST /api/train/evaluate?userId=some@email.com
-     * Returns prediction accuracy for that user's play history.
+     * Re-runs the prediction accuracy test without training again.
      */
     @PostMapping("/train/evaluate")
     public ResponseEntity<String> evaluateAccuracy(@RequestParam String userId) {
+        // Same as above, but intended to be used just for evaluation
         String result = trainingService.evaluatePredictionAccuracy(userId);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(result); // Return prediction accuracy summary
     }
 }

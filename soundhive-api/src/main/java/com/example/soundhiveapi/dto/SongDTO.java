@@ -3,16 +3,22 @@ package com.example.soundhiveapi.dto;
 import java.util.List;
 
 /**
- * A lightweight representation of a Song, including its parsed tags and tag weights.
+ * A lightweight representation of a Song, including:
+ * - Parsed tag names
+ * - Corresponding tag weights for the user
+ * - Song metadata (id, title, artist, length)
+ *
+ * This class is used to transfer only the relevant song data to the frontend.
  */
 public class SongDTO {
-    private final int          songId;
-    private final String       title;
-    private final String       artist;
-    private final List<String> tags;
-    private final List<Double> tagWeights;
-    private final long         songLength;
+    private final int          songId;      // Unique song identifier
+    private final String       title;       // Song title
+    private final String       artist;      // Artist name
+    private final List<String> tags;        // Tag names (e.g. ["Pop", "Indie"])
+    private final List<Double> tagWeights;  // Tag weights specific to user preferences
+    private final long         songLength;  // Duration of song in milliseconds
 
+    // Constructor to initialize all fields
     public SongDTO(int songId, String title, String artist,
                    List<String> tags, List<Double> tagWeights, long songLength) {
         this.songId     = songId;
@@ -23,6 +29,7 @@ public class SongDTO {
         this.songLength = songLength;
     }
 
+    // Getter methods for each field
     public int getSongId() {
         return songId;
     }

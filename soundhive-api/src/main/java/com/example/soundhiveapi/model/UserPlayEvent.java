@@ -1,71 +1,72 @@
 package com.example.soundhiveapi.model;
 
 import jakarta.persistence.*;
-import org.hibernate.annotations.CreationTimestamp;
-
-import java.sql.Timestamp;
 
 @Entity
-@IdClass(UserPlayEventId.class)
 @Table(name = "user_playevents")
 public class UserPlayEvent {
 
-    @Id
-    @Column(name = "user_id")
-    private String userId;
-
-    @Id
-    @Column(name = "song_id")
-    private int songId;
-
-    @Id
-    @CreationTimestamp
-    @Column(name = "play_time", updatable = false)
-    private Timestamp playTime;
+    @EmbeddedId
+    private UserPlayEventId id;
 
     @Column(name = "song_title")
-    private String songTitle;
+    private String title;
+
+    @Column(name = "favorited")
+    private boolean favorited;
+
+    @Column(name = "skipped")
+    private boolean skipped;
 
     public UserPlayEvent() {}
 
-    // Constructor used for inserting play events
-    public UserPlayEvent(String userId, int songId, String songTitle) {
-        this.userId = userId;
-        this.songId = songId;
-        this.songTitle = songTitle;
+    public UserPlayEvent(UserPlayEventId id, boolean favorited, boolean skipped) {
+        this.id = id;
+        this.favorited = favorited;
+        this.skipped = skipped;
     }
 
-    // Getters and Setters
+    public UserPlayEventId getId() {
+        return id;
+    }
+
+    public void setId(UserPlayEventId id) {
+        this.id = id;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public boolean isFavorited() {
+        return favorited;
+    }
+
+    public void setFavorited(boolean favorited) {
+        this.favorited = favorited;
+    }
+
+    public boolean isSkipped() {
+        return skipped;
+    }
+
+    public void setSkipped(boolean skipped) {
+        this.skipped = skipped;
+    }
 
     public String getUserId() {
-        return userId;
-    }
-
-    public void setUserId(String userId) {
-        this.userId = userId;
+        return id.getUserId();
     }
 
     public int getSongId() {
-        return songId;
+        return id.getSongId();
     }
 
-    public void setSongId(int songId) {
-        this.songId = songId;
-    }
-
-    public Timestamp getPlayTime() {
-        return playTime;
-    }
-
-    public void setPlayTime(Timestamp playTime) {
-        this.playTime = playTime;
-    }
-
-    public String getSongTitle() {
-        return songTitle;
-    }
-
-    public void setSongTitle(String songTitle) {
-        this.songTitle = songTitle;
+    public java.sql.Timestamp getPlayTime() {
+        return id.getPlayTime();
     }
 }

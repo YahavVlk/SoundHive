@@ -5,25 +5,25 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 @Entity
-@Table(name = "users")
+@Table(name = "users") // Maps this entity to the "users" table
 public class User {
 
     @Id
     @Column(name = "id_number", length = 9, nullable = false)
     @Size(min = 9, max = 9, message = "ID number must be exactly 9 digits")
-    @Pattern(regexp = "\\d{9}",  message = "ID number must contain only digits")
-    private String idNumber;
+    @Pattern(regexp = "\\d{9}", message = "ID number must contain only digits")
+    private String idNumber; // National ID, used as primary key
 
     @Column(nullable = false)
-    private String username;
+    private String username; // Display name of the user
 
     @Column(nullable = false, unique = true)
-    private String email;
+    private String email;    // Must be unique across users
 
     @Column(nullable = false)
-    private String password;  // Stored as BCrypt hash
+    private String password; // Hashed password (BCrypt)
 
-    // Getters and Setters
+    // --- Getters and Setters ---
 
     public String getIdNumber() {
         return idNumber;

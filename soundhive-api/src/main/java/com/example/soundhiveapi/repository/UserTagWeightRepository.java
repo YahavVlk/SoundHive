@@ -11,10 +11,23 @@ import java.util.List;
 @Repository
 public interface UserTagWeightRepository extends JpaRepository<UserTagWeight, UserTagWeightId> {
 
+    /**
+     * Retrieve all tag weights for a specific user.
+     * @param idNumber the user's ID number
+     * @return list of UserTagWeight entries
+     */
     List<UserTagWeight> findByIdNumber(String idNumber);
 
+    /**
+     * Fetch a list of all distinct user IDs that have tag weights.
+     * Useful for iterating over all active users.
+     */
     @Query("SELECT DISTINCT utw.idNumber FROM UserTagWeight utw")
     List<String> findDistinctUserIds();
 
-    void deleteByIdNumber(String idNumber);  // used when flushing play history
+    /**
+     * Delete all tag weights for a user — typically used when clearing data.
+     * @param idNumber the user's ID
+     */
+    void deleteByIdNumber(String idNumber); // used when flushing play history
 }

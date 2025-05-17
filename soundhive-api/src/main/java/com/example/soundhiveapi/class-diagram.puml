@@ -1,0 +1,176 @@
+@startuml class-diagram
+skinparam style strictuml
+skinparam classAttributeIconSize 0
+skinparam packageStyle rect
+skinparam componentStyle uml2
+skinparam dpi 150
+skinparam shadowing false
+skinparam linetype ortho
+left to right direction
+
+' Icons & Colors
+skinparam class {
+  BackgroundColor<<interface>> LightBlue
+  BorderColor<<interface>> DarkBlue
+  FontColor<<interface>> Black
+  BackgroundColor<<abstract>> LightGray
+  BorderColor<<abstract>> DimGray
+  FontColor<<abstract>> Black
+}
+
+' ========== MODEL ==========
+package "model" {
+  class Song {
+    - songId : int
+    - title : String
+    - artist : String
+    - tags : String
+    - songLength : long
+  }
+
+  class Tag {
+    - tagId : int
+    - tagName : String
+  }
+
+  class User {
+    - idNumber : String
+    - username : String
+    - email : String
+    - password : String
+  }
+
+  class UserPlayEvent {
+    - userId : String
+    - songId : int
+    - playTime : Timestamp
+    - songTitle : String
+  }
+
+  class UserTagWeight {
+    - idNumber : String
+    - tagId : int
+    - weight : double
+  }
+
+  class SongTag {
+    - songId : int
+    - tagId : int
+  }
+  class SongTagId
+  class UserPlayEventId
+  class UserTagWeightId
+}
+
+' ========== DTO ==========
+package "dto" {
+  class SongDTO {
+    - songId : int
+    - title : String
+    - artist : String
+    - tags : List<String>
+    - tagWeights : List<Double>
+    - songLength : long
+  }
+}
+
+' ========== NEURAL ==========
+package "neural" {
+  interface ActivationFunction <<interface>>
+  interface Optimizer <<interface>>
+
+  class AdamOptimizer {
+    - lr : double
+    - beta1 : double
+    - beta2 : double
+    - eps : double
+  }
+
+  class DenseLayer {
+    - inputSize : int
+    - outputSize : int
+    - weights : double[][]
+    - biases : double[]
+  }
+
+  class NeuralNetwork {
+    - layers : List<Layer>
+    - learningRate : double
+    - epochs : int
+    - songIdOrder : List<Integer>
+  }
+
+  class TrainingExample
+  class LayerGradients
+  class ModelSerializer
+  class Loss
+  interface Layer <<interface>>
+}
+
+' ========== REPOSITORY ==========
+package "repository" {
+  interface SongRepository <<interface>>
+  interface TagRepository <<interface>>
+  interface UserRepository <<interface>>
+  interface UserPlayEventRepository <<interface>>
+  interface UserTagWeightRepository <<interface>>
+  interface SongTagRepository <<interface>>
+}
+
+' ========== SERVICE ==========
+package "service" {
+  class MyJdbcService
+  class RecommendationService
+  class FeatureUpdateService
+  class TrainingService
+  class ListeningService
+}
+
+' ========== SECURITY ==========
+package "security" {
+  class JwtRequestFilter
+  class JwtUtil
+  class TokenBlacklist
+  class JdbcUserDetailsService
+  class SecurityConfig
+}
+
+' ========== CONTROLLER ==========
+package "controller" {
+  class AuthController
+  class DataController
+  class FeedbackController
+  class ListeningController
+  class LogoutController
+  class PasswordResetController
+  class RecommendationController
+  class TrainingController
+}
+
+' ========== MAIN ==========
+package "main" {
+  class SoundhiveApiApplication
+  class ShutdownManager
+}
+
+' ========== RELATIONS ==========
+AdamOptimizer ..|> Optimizer
+DenseLayer ..|> Layer
+SongTagId --> SongTag
+UserPlayEventId --> UserPlayEvent
+UserTagWeightId --> UserTagWeight
+MyJdbcService --> NeuralNetwork
+TrainingService --> NeuralNetwork
+RecommendationService --> MyJdbcService
+FeatureUpdateService --> MyJdbcService
+ListeningService --> FeatureUpdateService
+ListeningService --> MyJdbcService
+JwtRequestFilter --> JwtUtil
+JwtRequestFilter --> JdbcUserDetailsService
+SecurityConfig --> JwtRequestFilter
+JdbcUserDetailsService --> MyJdbcService
+AuthController --> JwtUtil
+AuthController --> JdbcUserDetailsService
+ShutdownManager --> NeuralNetwork
+ShutdownManager --> FeatureUpdateService
+@enduml

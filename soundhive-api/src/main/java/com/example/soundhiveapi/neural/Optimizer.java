@@ -4,12 +4,16 @@ import java.util.List;
 
 /**
  * Interface for optimizers (e.g., Adam, SGD).
+ * Optimizers update layer weights and biases based on gradients.
  */
 public interface Optimizer {
+
     /**
-     * Update each layer's parameters given their computed gradients.
-     * @param layers list of layers in the network
-     * @param grads  corresponding list of gradients
+     * Applies the gradients to the given layers.
+     * Typically called after a full backward pass.
+     *
+     * @param layers list of neural network layers to update
+     * @param grads  list of computed gradients (must align with layer order)
      */
     void applyGradients(List<Layer> layers, List<LayerGradients> grads);
 }
