@@ -15,17 +15,15 @@ import java.util.stream.Collectors;
 @Service
 public class TrainingService {
 
-    @Autowired
-    private MyJdbcService jdbc;
-    @Autowired
-    private NeuralNetwork neuralNetwork;
+    @Autowired private MyJdbcService jdbc;
+    @Autowired private NeuralNetwork neuralNetwork;
 
-    private final List<TrainingExample> buffer = new ArrayList<>(); // Buffer of examples for batch training
+    private final List<TrainingExample> buffer = new ArrayList<>();
     private static final int BATCH_SIZE = 10;
 
     /**
-     * Add a single training example to the buffer.
-     * When the buffer reaches BATCH_SIZE, train the network on the batch.
+     * Adds a training example to the buffer.
+     * Triggers batch training when BATCH_SIZE is reached.
      */
     public void trainOnExample(TrainingExample ex) {
         buffer.add(ex);
@@ -37,7 +35,7 @@ public class TrainingService {
     }
 
     /**
-     * Save the current state of the neural network to disk (model.dat).
+     * Saves the current model state to disk.
      */
     public void saveModel() {
         try {
@@ -48,12 +46,10 @@ public class TrainingService {
     }
 
     /**
-     * Manually trigger training using the buffered examples.
-     * Also clears the buffer and saves the model afterward.
+     * Manually triggers training with the current buffer and saves the model.
      */
     public void train() {
         neuralNetwork.setSongIdOrder(jdbc.getDistinctSongIds());
-
         if (!buffer.isEmpty()) {
             neuralNetwork.trainBatch(buffer);
             buffer.clear();
@@ -62,41 +58,40 @@ public class TrainingService {
     }
 
     /**
-     * Evaluate the prediction accuracy for a specific user.
-     * Compares the top 20 predicted songs to the user's listening history.
+     * Evaluates prediction accuracy for a user by comparing predicted top songs
+     * to their actual listening history.
      */
     public String evaluatePredictionAccuracy(String userId) {
         List<Integer> songIds = jdbc.getDistinctSongIds();
-        neuralNetwork.setSongIdOrder(songIds); // Ensure output alignment
+        neuralNetwork.setSongIdOrder(songIds);
 
-        // Get actual songs the user has listened to
         Set<Integer> history = jdbc.getUserPlayHistory(userId).stream()
                 .map(UserPlayEvent::getSongId)
                 .collect(Collectors.toSet());
 
-        // Generate prediction scores from the model
-        double[] input = jdbc.getUserTagWeightsArray(userId); // tag weight vector
-        double[] predictions = neuralNetwork.predict(input);  // predicted song scores
+        double[] input = jdbc.getUserTagWeightsArray(userId);
+        if (input == null || input.length == 0) return "User has no tag weights.";
 
-        // Sort song IDs by predicted score descending
+        double[] predictions = neuralNetwork.predict(input);
+
         List<Integer> ranked = new ArrayList<>(songIds);
-        ranked.sort((a, b) -> Double.compare(
+        Collections.sort(ranked, (a, b) -> Double.compare(
                 predictions[songIds.indexOf(b)],
                 predictions[songIds.indexOf(a)]));
 
-        // Output top 20 predictions
-        System.out.println("\n🎵 Top 20 predicted songs:");
+        StringBuilder sb = new StringBuilder("\n🎵 Top 20 predicted songs:\n");
         for (int i = 0; i < Math.min(20, ranked.size()); i++) {
             int songId = ranked.get(i);
             String title = jdbc.getSongTitle(songId);
             double score = predictions[songIds.indexOf(songId)];
             boolean inHistory = history.contains(songId);
-            System.out.printf("%2d. %s (%.3f)%s%n", i + 1, title, score, inHistory ? " ✅" : "");
+            sb.append(String.format("%2d. %s (%.3f)%s%n", i + 1, title, score, inHistory ? " ✅" : ""));
         }
 
-        // Calculate accuracy as overlap with listening history
         long correct = ranked.stream().limit(20).filter(history::contains).count();
         double accuracy = correct / 20.0;
-        return String.format("🎯 Accuracy for %s: %.2f%%", userId, accuracy * 100);
+        sb.append(String.format("Accuracy for %s: %.2f%%", userId, accuracy * 100));
+
+        return sb.toString();
     }
 }

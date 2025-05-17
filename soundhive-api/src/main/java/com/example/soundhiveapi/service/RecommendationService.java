@@ -27,10 +27,11 @@ public class RecommendationService {
         if (coldStartUsers.contains(userId)) {
             result = recommendCollaboratively(userId, k, recentlyPlayed);
 
-            // If collaborative returns fewer than needed, fall back to neural
             if (result.size() < k) {
                 coldStartUsers.remove(userId);
-                List<Song> fallback = recommendNeurally(userId, k - result.size(), recentlyPlayed, result);
+                Set<Integer> combinedExcluded = new HashSet<>(recentlyPlayed);
+                result.forEach(song -> combinedExcluded.add(song.getSongId()));
+                List<Song> fallback = recommendNeurally(userId, k - result.size(), combinedExcluded, result);
                 result.addAll(fallback);
             }
         } else {
@@ -126,7 +127,6 @@ public class RecommendationService {
         for (Song s : alreadyRecommended) allExcluded.add(s.getSongId());
 
         return recommendAll(userId, allExcluded).stream()
-                .filter(s -> !containsSong(alreadyRecommended, s.getSongId()))
                 .limit(k)
                 .collect(Collectors.toList());
     }

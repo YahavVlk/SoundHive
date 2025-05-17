@@ -11,9 +11,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/listening")
@@ -83,7 +81,7 @@ public class ListeningController {
     }
 
     @PostMapping("/manual/feedback")
-    public ResponseEntity<String> submitManualFeedback(
+    public ResponseEntity<Void> submitManualFeedback(
             @RequestParam(defaultValue = "false") boolean favorite,
             @RequestParam(defaultValue = "false") boolean unfavorite,
             @AuthenticationPrincipal UserDetails userDetails
@@ -93,6 +91,38 @@ public class ListeningController {
         String idNumber = user.getIdNumber();
 
         listeningService.commitManualFeedback(idNumber, favorite, unfavorite);
-        return ResponseEntity.ok("Feedback submitted.");
+        return ResponseEntity.ok().build();
+    }
+
+
+    @GetMapping("/session/history")
+    public ResponseEntity<List<SongDTO>> getSessionHistory(@AuthenticationPrincipal UserDetails userDetails) {
+        String email = userDetails.getUsername();
+        User user = jdbcService.getUserByEmail(email);
+        String idNumber = user.getIdNumber();
+
+        List<Song> recentSongs = listeningService.getSessionHistoryForUser(idNumber);
+        List<SongDTO> dtoList = new ArrayList<>();
+
+        for (Song song : recentSongs) {
+            List<String> tags = Arrays.stream(song.getTags().split(","))
+                    .map(String::trim)
+                    .filter(t -> !t.isEmpty())
+                    .toList();
+
+            List<Double> tagWeights = new ArrayList<>();
+            for (int i = 0; i < tags.size(); i++) tagWeights.add(0.0); // placeholder weights
+
+            dtoList.add(new SongDTO(
+                    song.getSongId(),
+                    song.getTitle(),
+                    song.getArtist(),
+                    tags,
+                    tagWeights,
+                    song.getSongLength()
+            ));
+        }
+
+        return ResponseEntity.ok(dtoList);
     }
 }

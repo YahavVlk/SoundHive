@@ -328,7 +328,7 @@ public class MyJdbcService {
     }
 
     public List<Integer> getRecentSongIds(String userId) {
-        String query = "SELECT song_id FROM user_playevents WHERE user_id = ? ORDER BY play_time DESC LIMIT 10";
+        String query = "SELECT song_id FROM user_playevents WHERE user_id = ? ORDER BY play_time DESC LIMIT 50";
         List<Integer> songIds = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
              PreparedStatement stmt = connection.prepareStatement(query)) {
@@ -351,5 +351,26 @@ public class MyJdbcService {
             map.put(w.getTagId(), w.getWeight());
         }
         return map;
+    }
+
+    public Deque<Integer> getLastPlayedSongIds(String userId, int limit) {
+        String query = "SELECT song_id FROM user_playevents WHERE user_id = ? ORDER BY play_time DESC LIMIT ?";
+        Deque<Integer> songIds = new ArrayDeque<>();
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(query)) {
+
+            stmt.setString(1, userId);
+            stmt.setInt(2, limit);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    songIds.addLast(rs.getInt("song_id"));
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return songIds;
     }
 }

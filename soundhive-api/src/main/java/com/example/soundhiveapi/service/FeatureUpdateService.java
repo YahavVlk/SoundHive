@@ -14,21 +14,17 @@ import java.util.stream.Collectors;
 @Service
 public class FeatureUpdateService {
 
-    private static final int MAX_EVENTS = 20; // Limit for play history stored per user
-    private static final int BATCH_SIZE = 5;   // Flush when at least 5 tag updates collected
+    private static final int MAX_EVENTS = 50;
+    private static final int BATCH_SIZE = 5;
 
     @Autowired private MyJdbcService jdbc;
     @Autowired private UserTagWeightRepository tagWeightRepo;
     @Autowired private UserPlayEventRepository playRepo;
     @Autowired private TrainingService trainingService;
 
-    // In-memory caches
     private final Map<String, List<UserTagWeight>> pendingUpdates = new HashMap<>();
     private final Map<String, Integer> updateCounter = new HashMap<>();
 
-    /**
-     * Records user feedback and defers writing to DB until batch size met.
-     */
     public void recordFeedback(String userId, int songId, long timestamp, boolean isFavorite, boolean isUnfavorited) {
         double actualPct = Math.min(1.0, timestamp / (double) jdbc.getSongDuration(songId));
         System.out.printf("[recordFeedback] userId=%s, songId=%d, timestamp=%d, isFavorite=%s, isUnfavorited=%s%n",
@@ -36,10 +32,12 @@ public class FeatureUpdateService {
 
         savePlayEvent(userId, songId);
         List<Tag> tags = jdbc.getSongWithTags(songId).tags;
-        List<UserTagWeight> weights = tagWeightRepo.findByIdNumber(userId);
+        List<UserTagWeight> currentWeights = tagWeightRepo.findByIdNumber(userId);
 
         Map<Integer, UserTagWeight> weightMap = new HashMap<>();
-        for (UserTagWeight w : weights) weightMap.put(w.getTagId(), w);
+        for (UserTagWeight w : currentWeights) {
+            weightMap.put(w.getTagId(), new UserTagWeight(w.getIdNumber(), w.getTagId(), w.getWeight()));
+        }
 
         double positiveDelta = 0.07;
         double negativeDelta = 0.01;
@@ -56,18 +54,29 @@ public class FeatureUpdateService {
             weightMap.put(tag.getTagId(), w);
         }
 
-        List<UserTagWeight> updates = new ArrayList<>(weightMap.values());
-        pendingUpdates.computeIfAbsent(userId, k -> new ArrayList<>()).addAll(updates);
+        List<UserTagWeight> changed = new ArrayList<>();
+        for (UserTagWeight updated : weightMap.values()) {
+            double original = currentWeights.stream()
+                    .filter(w -> w.getTagId() == updated.getTagId())
+                    .mapToDouble(UserTagWeight::getWeight)
+                    .findFirst()
+                    .orElse(0.2);
+
+            if (Math.abs(original - updated.getWeight()) > 0.001) {
+                changed.add(updated);
+            }
+        }
+
+        pendingUpdates.computeIfAbsent(userId, k -> new ArrayList<>()).addAll(changed);
         updateCounter.put(userId, updateCounter.getOrDefault(userId, 0) + 1);
 
-        if (updateCounter.get(userId) >= BATCH_SIZE) {
-            flushUserToDb(userId);
+        synchronized (userId.intern()) {
+            if (updateCounter.get(userId) >= BATCH_SIZE) {
+                flushUserToDb(userId);
+            }
         }
     }
 
-    /**
-     * Flushes cached updates for a specific user.
-     */
     @Transactional
     public void flushUserToDb(String userId) {
         List<UserTagWeight> list = pendingUpdates.getOrDefault(userId, new ArrayList<>());
@@ -78,9 +87,6 @@ public class FeatureUpdateService {
         updateCounter.remove(userId);
     }
 
-    /**
-     * Flushes all cached updates.
-     */
     @Transactional
     public void flushToDb() {
         System.out.println("[flushToDb] Flushing all data to DB...");
@@ -89,9 +95,6 @@ public class FeatureUpdateService {
         }
     }
 
-    /**
-     * Saves play event and trims history to MAX_EVENTS.
-     */
     private void savePlayEvent(String userId, int songId) {
         Timestamp playTime = new Timestamp(System.currentTimeMillis());
 
@@ -108,13 +111,11 @@ public class FeatureUpdateService {
         }
     }
 
-
-    /**
-     * Optional normalization helper.
-     */
     public void normalizeWeights(String userId) {
         List<UserTagWeight> weights = tagWeightRepo.findByIdNumber(userId);
         double sum = weights.stream().mapToDouble(UserTagWeight::getWeight).sum();
+        if (sum == 0) return;
+
         for (UserTagWeight w : weights) {
             w.setWeight(w.getWeight() / sum);
         }
