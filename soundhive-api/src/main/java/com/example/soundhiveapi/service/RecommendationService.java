@@ -48,7 +48,7 @@ public class RecommendationService {
     public List<Song> recommendAll(String userId, Set<Integer> excluded) {
         double[] scores = jdbc.getPredictedScores(userId);
         List<Integer> songIds = jdbc.getDistinctSongIds();
-        final double rarityWeightFactor = 0.25;
+        final double rarityWeightFactor = 0.4;
 
         PriorityQueue<SongScore> heap = new PriorityQueue<>(Comparator.comparingDouble(s -> -s.score));
         System.out.println("[RecommendAll] Excluded song IDs: " + excluded);
@@ -75,11 +75,11 @@ public class RecommendationService {
             Map<Tag, Double> globalPopularity = jdbc.getTagGlobalPopularity(swt.tags);
             double rarityBonus = swt.tags.stream()
                     .mapToDouble(tag -> {
-                        double rarity = 1.0 / Math.max(1.0, globalPopularity.getOrDefault(tag, 0.0));
-                        return rarity * userWeights.getOrDefault(tag.getTagId(), 0.0);
+                        double count = globalPopularity.getOrDefault(tag, 0.0);
+                        double inverseFreq = 1.0 / Math.log(2 + count); // log-scaling for stability
+                        return inverseFreq * userWeights.getOrDefault(tag.getTagId(), 0.0);
                     })
                     .sum();
-
             double finalScore = scores[i] + rarityWeightFactor * rarityBonus;
             System.out.printf("[RecommendAll] Candidate songId=%d, title='%s', score=%.4f%n",
                     songId, song.getTitle(), finalScore);
