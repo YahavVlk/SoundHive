@@ -72,10 +72,9 @@ public class ListeningService {
                 double predicted = jdbc.getPredictedScore(userId, songId);
                 double actual = 0;
 
-                System.out.println("\u25B6 Listening: " + song.getTitle());
+                System.out.println("▶ Listening: " + song.getTitle());
 
                 boolean fav = false;
-                boolean unfav = false;
                 boolean skipped = false;
 
                 for (double pct = feedbackIntervalPct; pct <= 1.0; pct += feedbackIntervalPct) {
@@ -87,17 +86,20 @@ public class ListeningService {
                     double skipChance = 0.5 - 0.4 * pct;
                     skipped = isSimulated && Math.random() < skipChance;
 
-                    if (pct >= 0.8 && !fav && isSimulated && !skipped && Math.random() < 0.1) fav = true;
-                    else if (pct >= 0.8 && !fav && !unfav && isSimulated && !skipped && Math.random() < 0.03) unfav = true;
+                    if (pct >= 0.8 && !fav && isSimulated && !skipped && Math.random() < 0.1) {
+                        fav = true;
+                    }
 
-                    System.out.println((skipped ? "\u23ED Skipped" : fav ? "\u2764\uFE0F Favorited" : unfav ? "\uD83D\uDDD1 Unfavorited" : "\uD83C\uDFA7 Listened") + " at " + (int)(pct * 100) + "%");
+                    System.out.println((skipped ? "⏭ Skipped" : fav ? "❤️ Favorited" : "🎧 Listened") + " at " + (int)(pct * 100) + "%");
 
                     if (isSimulated) try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
                     if (skipped) break;
                 }
 
                 if (actual > 0.0) {
-                    featureSvc.recordFeedback(userId, songId, (long)(duration * actual), fav, unfav);
+                    boolean wasSkipped = actual < 1.0;
+
+                    featureSvc.recordFeedback(userId, songId, (long)(duration * actual), fav, wasSkipped);
                     featureSvc.flushToDb();
 
                     recentlyPlayed.add(songId);
@@ -116,7 +118,7 @@ public class ListeningService {
                 }
             }
 
-            System.out.println("\uD83D\uDED1 Listening stopped for userId=" + userId);
+            System.out.println("🛑 Listening stopped for userId=" + userId);
         }).start();
     }
 
@@ -149,7 +151,7 @@ public class ListeningService {
         return queue.peekFirst();
     }
 
-    public void commitManualFeedback(String userId, boolean favorite, boolean unfavorite) {
+    public void commitManualFeedback(String userId, boolean favorite, boolean skipped) {
         Deque<Song> queue = userQueues.get(userId);
         Set<Integer> recentlyPlayed = recentHistory.get(userId);
 
@@ -159,9 +161,10 @@ public class ListeningService {
         if (song == null) return;
 
         int songId = song.getSongId();
-        long timestamp = System.currentTimeMillis();
+        long duration = jdbc.getSongDuration(songId);
+        long timestamp = skipped ? (long)(duration * 0.4) : duration;
 
-        featureSvc.recordFeedback(userId, songId, timestamp, favorite, unfavorite);
+        featureSvc.recordFeedback(userId, songId, timestamp, favorite, skipped);
         featureSvc.flushToDb();
 
         recentlyPlayed.add(songId);
@@ -173,8 +176,10 @@ public class ListeningService {
 
         double[] input = jdbc.getUserTagWeightsArray(userId);
         Map<Integer, Double> label = new HashMap<>();
-        label.put(songId, 1.0);
+        label.put(songId, skipped ? 0.4 : 1.0);
         trainer.trainOnExample(new TrainingExample(input, label));
+
+        sessionHistory.getOrDefault(userId, new ArrayList<>()).add(song);
     }
 
     public List<Song> getSessionHistoryForUser(String userId) {

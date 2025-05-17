@@ -25,12 +25,13 @@ public class FeatureUpdateService {
     private final Map<String, List<UserTagWeight>> pendingUpdates = new HashMap<>();
     private final Map<String, Integer> updateCounter = new HashMap<>();
 
-    public void recordFeedback(String userId, int songId, long timestamp, boolean isFavorite, boolean isUnfavorited) {
+    public void recordFeedback(String userId, int songId, long timestamp, boolean isFavorite, boolean isSkipped) {
         double actualPct = Math.min(1.0, timestamp / (double) jdbc.getSongDuration(songId));
-        System.out.printf("[recordFeedback] userId=%s, songId=%d, timestamp=%d, isFavorite=%s, isUnfavorited=%s%n",
-                userId, songId, timestamp, isFavorite, isUnfavorited);
+        System.out.printf("[recordFeedback] userId=%s, songId=%d, timestamp=%d, isFavorite=%s, isSkipped=%s%n",
+                userId, songId, timestamp, isFavorite, isSkipped);
 
-        savePlayEvent(userId, songId);
+        savePlayEvent(userId, songId, isFavorite, isSkipped);
+
         List<Tag> tags = jdbc.getSongWithTags(songId).tags;
         List<UserTagWeight> currentWeights = tagWeightRepo.findByIdNumber(userId);
 
@@ -47,8 +48,11 @@ public class FeatureUpdateService {
             double old = w.getWeight();
             double newWeight = old;
 
-            if (isFavorite || actualPct >= 0.8) newWeight += positiveDelta;
-            else if (actualPct <= 0.4 || isUnfavorited) newWeight -= negativeDelta;
+            if (isFavorite || actualPct >= 0.8) {
+                newWeight += positiveDelta;
+            } else if (actualPct <= 0.4 || isSkipped) {
+                newWeight -= negativeDelta;
+            }
 
             w.setWeight(Math.min(1.0, Math.max(0.05, newWeight)));
             weightMap.put(tag.getTagId(), w);
@@ -95,13 +99,12 @@ public class FeatureUpdateService {
         }
     }
 
-    private void savePlayEvent(String userId, int songId) {
+    private void savePlayEvent(String userId, int songId, boolean isFavorite, boolean isSkipped) {
         Timestamp playTime = new Timestamp(System.currentTimeMillis());
-
         UserPlayEventId id = new UserPlayEventId(userId, songId, playTime);
-        UserPlayEvent ev = new UserPlayEvent(id, false, false);
-        ev.setTitle(jdbc.getSongTitle(songId));
 
+        UserPlayEvent ev = new UserPlayEvent(id, isFavorite, isSkipped);
+        ev.setTitle(jdbc.getSongTitle(songId));
         playRepo.save(ev);
 
         List<UserPlayEvent> events = playRepo.findAllByIdUserId(userId);

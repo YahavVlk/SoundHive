@@ -145,4 +145,24 @@ public class NeuralNetwork {
     public List<Integer> getSongIdOrder() {
         return songIdOrder;
     }
+
+    public double[] getWeights() {
+        List<Double> allWeights = new ArrayList<>();
+        for (Layer layer : layers) {
+            if (layer instanceof DenseLayer dense) {
+                double[][] w = dense.getWeights();
+                for (double[] row : w) {
+                    for (double val : row) {
+                        allWeights.add(val);
+                    }
+                }
+            }
+        }
+        // Convert List<Double> to double[]
+        double[] flat = new double[allWeights.size()];
+        for (int i = 0; i < allWeights.size(); i++) {
+            flat[i] = allWeights.get(i);
+        }
+        return flat;
+    }
 }

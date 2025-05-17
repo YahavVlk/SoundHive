@@ -373,4 +373,37 @@ public class MyJdbcService {
 
         return songIds;
     }
+
+    public double[] getSongTagVector(int songId, List<Tag> tags) {
+        Set<Integer> songTagIds = getTagIdsForSong(songId); // You must implement this
+        double[] vector = new double[tags.size()];
+        for (int i = 0; i < tags.size(); i++) {
+            if (songTagIds.contains(tags.get(i).getTagId())) {
+                vector[i] = 1.0;
+            } else {
+                vector[i] = 0.0;
+            }
+        }
+        return vector;
+    }
+
+    public Set<Integer> getTagIdsForSong(int songId) {
+        String sql = "SELECT tag_id FROM song_tag WHERE song_id = ?";
+        Set<Integer> tagIds = new HashSet<>();
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setInt(1, songId);
+            ResultSet rs = stmt.executeQuery();
+
+            while (rs.next()) {
+                tagIds.add(rs.getInt("tag_id"));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return tagIds;
+    }
 }

@@ -5,35 +5,31 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * Admin endpoint to trigger training manually and evaluate model accuracy.
- */
 @RestController
 @RequestMapping("/api")
 public class TrainingController {
 
-    @Autowired private TrainingService trainingService;
+    @Autowired
+    private TrainingService trainingService;
 
     /**
      * POST /api/train?userId=some@email.com
-     * Trains the model using all available feedback data for the given user
-     * and returns a prediction accuracy report.
+     * Trains the model using buffered examples and returns evaluation result string.
      */
     @PostMapping("/train")
     public ResponseEntity<String> trainOnce(@RequestParam String userId) {
-        // Evaluate prediction accuracy for the user (includes internal training logic)
-        String result = trainingService.evaluatePredictionAccuracy(userId);
-        return ResponseEntity.ok(result); // Return result string to frontend
+        trainingService.train();  // Trigger training on buffered examples
+        double result = trainingService.evaluate(userId);  // Evaluate and return detailed result
+        return ResponseEntity.ok("Training completed:\n" + result);
     }
 
     /**
-     * POST /api/train/evaluate?userId=some@email.com
-     * Re-runs the prediction accuracy test without training again.
+     * GET /api/train/evaluate?userId=some@email.com
+     * Evaluates the model's current predictions without additional training.
      */
-    @PostMapping("/train/evaluate")
+    @GetMapping("/train/evaluate")
     public ResponseEntity<String> evaluateAccuracy(@RequestParam String userId) {
-        // Same as above, but intended to be used just for evaluation
-        String result = trainingService.evaluatePredictionAccuracy(userId);
-        return ResponseEntity.ok(result); // Return prediction accuracy summary
+        double result = trainingService.evaluate(userId);  // Evaluate and return detailed result
+        return ResponseEntity.ok("Evaluation only:\n" + result);
     }
 }

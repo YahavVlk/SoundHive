@@ -5,6 +5,7 @@ import com.example.soundhiveapi.model.User;
 import com.example.soundhiveapi.dto.SongDTO;
 import com.example.soundhiveapi.service.ListeningService;
 import com.example.soundhiveapi.service.MyJdbcService;
+import com.example.soundhiveapi.service.TrainingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -19,6 +20,7 @@ public class ListeningController {
 
     @Autowired private ListeningService listeningService;
     @Autowired private MyJdbcService jdbcService;
+    @Autowired private TrainingService trainingService;
 
     @PostMapping("/start")
     public ResponseEntity<String> startListening(
