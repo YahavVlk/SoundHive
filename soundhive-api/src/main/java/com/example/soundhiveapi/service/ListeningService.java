@@ -11,9 +11,9 @@ import java.util.concurrent.*;
 @Service
 public class ListeningService {
 
-    @Autowired private MyJdbcService         jdbc;
-    @Autowired private FeatureUpdateService  featureSvc;
-    @Autowired private TrainingService       trainer;
+    @Autowired private MyJdbcService jdbc;
+    @Autowired private FeatureUpdateService featureSvc;
+    @Autowired private TrainingService trainer;
     @Autowired private RecommendationService recommendationService;
 
     private final Set<String> activeUsers = ConcurrentHashMap.newKeySet();
@@ -21,6 +21,7 @@ public class ListeningService {
     private final Map<String, Boolean> simulationMode = new ConcurrentHashMap<>();
     private final Map<String, Set<Integer>> recentHistory = new ConcurrentHashMap<>();
     private final Map<String, List<Song>> sessionHistory = new ConcurrentHashMap<>();
+    private final Map<String, Map<Integer, Double>> predictedScores = new ConcurrentHashMap<>();
 
     private static final int QUEUE_SIZE = 10;
     private static final int REFILL_THRESHOLD = 5;
@@ -42,13 +43,12 @@ public class ListeningService {
         Deque<Integer> lastPlayed = jdbc.getLastPlayedSongIds(userId, HISTORY_LIMIT);
         Set<Integer> recentlyPlayed = new LinkedHashSet<>(lastPlayed);
         recentHistory.put(userId, recentlyPlayed);
-
         sessionHistory.put(userId, new ArrayList<>());
-
         activeUsers.add(userId);
         userQueues.putIfAbsent(userId, new ArrayDeque<>());
-        Deque<Song> queue = userQueues.get(userId);
+        predictedScores.putIfAbsent(userId, new HashMap<>());
 
+        Deque<Song> queue = userQueues.get(userId);
         boolean isSimulated = simulationMode.getOrDefault(userId, true);
 
         new Thread(() -> {
@@ -56,8 +56,10 @@ public class ListeningService {
                 if (queue.size() <= REFILL_THRESHOLD) {
                     List<Song> batch = recommendationService.recommend(userId, QUEUE_SIZE, recentlyPlayed);
                     for (Song song : batch) {
-                        if (song != null && !queue.stream().anyMatch(s -> s.getSongId() == song.getSongId())) {
+                        if (song != null && queue.stream().noneMatch(s -> s.getSongId() == song.getSongId())) {
                             queue.addLast(song);
+                            double predicted = jdbc.getPredictedScore(userId, song.getSongId());
+                            predictedScores.get(userId).put(song.getSongId(), predicted);
                         }
                     }
                 }
@@ -68,14 +70,11 @@ public class ListeningService {
 
                 int songId = song.getSongId();
                 long duration = jdbc.getSongDuration(songId);
-
-                double predicted = jdbc.getPredictedScore(userId, songId);
                 double actual = 0;
-
-                System.out.println("▶ Listening: " + song.getTitle());
-
                 boolean fav = false;
                 boolean skipped = false;
+
+                System.out.println("▶ Listening: " + song.getTitle());
 
                 for (double pct = feedbackIntervalPct; pct <= 1.0; pct += feedbackIntervalPct) {
                     if (!activeUsers.contains(userId)) break;
@@ -83,8 +82,21 @@ public class ListeningService {
                     long timestamp = (long)(duration * pct);
                     actual = pct;
 
-                    double skipChance = 0.5 - 0.4 * pct;
-                    skipped = isSimulated && Math.random() < skipChance;
+                    double baseSkip = 0.3;
+                    double decayRate = 0.25;
+                    double chanceToSkipNow = baseSkip * (1 - pct * decayRate);
+                    chanceToSkipNow = Math.max(0.02, chanceToSkipNow);
+
+                    // Slightly increased exploration with blended behavior
+                    if (isSimulated && Math.random() < 0.25) {
+                        boolean flip = Math.random() < 0.4;
+                        if (flip) {
+                            System.out.println("[Exploration] Light taste deviation at " + (int)(pct * 100) + "%");
+                            chanceToSkipNow = 0.5 * chanceToSkipNow + 0.5 * (1.0 - chanceToSkipNow);
+                        }
+                    }
+
+                    skipped = isSimulated && Math.random() < chanceToSkipNow;
 
                     if (pct >= 0.8 && !fav && isSimulated && !skipped && Math.random() < 0.1) {
                         fav = true;
@@ -109,10 +121,19 @@ public class ListeningService {
                         it.remove();
                     }
 
-                    double[] input = jdbc.getUserTagWeightsArray(userId);
-                    Map<Integer, Double> label = new HashMap<>();
-                    label.put(songId, actual);
-                    trainer.trainOnExample(new TrainingExample(input, label));
+                    double predicted = predictedScores.getOrDefault(userId, Collections.emptyMap())
+                            .getOrDefault(songId, 0.0);
+                    double loss = Math.abs(predicted - actual);
+
+                    if (actual < 0.2) {
+                        System.out.printf("[TrainDecision] Skipped training — actual %.2f too low (likely noise).%n", actual);
+                    } else if (loss > 0.15) {
+                        double[] input = jdbc.getUserTagWeightsArray(userId);
+                        Map<Integer, Double> label = Map.of(songId, actual);
+                        trainer.trainOnExample(new TrainingExample(userId, input, label));
+                    } else {
+                        System.out.println("[TrainDecision] Skipped training for this song (low error).");
+                    }
 
                     sessionHistory.get(userId).add(song);
                 }
@@ -128,22 +149,25 @@ public class ListeningService {
         userQueues.remove(userId);
         simulationMode.remove(userId);
         recentHistory.remove(userId);
+        predictedScores.remove(userId);
         trainer.saveModel();
     }
 
     public Song getNextRecommendedSong(String userId) {
         userQueues.putIfAbsent(userId, new ArrayDeque<>());
-        recentHistory.putIfAbsent(userId, new LinkedHashSet<>(
-                jdbc.getLastPlayedSongIds(userId, HISTORY_LIMIT)));
+        recentHistory.putIfAbsent(userId, new LinkedHashSet<>(jdbc.getLastPlayedSongIds(userId, HISTORY_LIMIT)));
 
         Deque<Song> queue = userQueues.get(userId);
         Set<Integer> recentlyPlayed = recentHistory.get(userId);
+        predictedScores.putIfAbsent(userId, new HashMap<>());
 
         if (queue.size() <= REFILL_THRESHOLD) {
             List<Song> batch = recommendationService.recommend(userId, QUEUE_SIZE, recentlyPlayed);
             for (Song song : batch) {
-                if (song != null && !queue.stream().anyMatch(s -> s.getSongId() == song.getSongId())) {
+                if (song != null && queue.stream().noneMatch(s -> s.getSongId() == song.getSongId())) {
                     queue.addLast(song);
+                    double predicted = jdbc.getPredictedScore(userId, song.getSongId());
+                    predictedScores.get(userId).put(song.getSongId(), predicted);
                 }
             }
         }
@@ -156,13 +180,13 @@ public class ListeningService {
         Set<Integer> recentlyPlayed = recentHistory.get(userId);
 
         if (queue == null || queue.isEmpty()) return;
-
         Song song = queue.pollFirst();
         if (song == null) return;
 
         int songId = song.getSongId();
         long duration = jdbc.getSongDuration(songId);
         long timestamp = skipped ? (long)(duration * 0.4) : duration;
+        double actual = skipped ? 0.4 : 1.0;
 
         featureSvc.recordFeedback(userId, songId, timestamp, favorite, skipped);
         featureSvc.flushToDb();
@@ -174,10 +198,15 @@ public class ListeningService {
             it.remove();
         }
 
-        double[] input = jdbc.getUserTagWeightsArray(userId);
-        Map<Integer, Double> label = new HashMap<>();
-        label.put(songId, skipped ? 0.4 : 1.0);
-        trainer.trainOnExample(new TrainingExample(input, label));
+        double predicted = predictedScores.getOrDefault(userId, Collections.emptyMap())
+                .getOrDefault(songId, 0.0);
+        double loss = Math.abs(predicted - actual);
+
+        if (loss > 0.15) {
+            double[] input = jdbc.getUserTagWeightsArray(userId);
+            Map<Integer, Double> label = Map.of(songId, actual);
+            trainer.trainOnExample(new TrainingExample(userId, input, label));
+        }
 
         sessionHistory.getOrDefault(userId, new ArrayList<>()).add(song);
     }

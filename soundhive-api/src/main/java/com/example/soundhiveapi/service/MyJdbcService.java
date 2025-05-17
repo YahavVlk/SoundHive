@@ -95,6 +95,18 @@ public class MyJdbcService {
         List<Tag> tags = getAllTags();
         double[] vector = new double[tags.size()];
         List<UserTagWeight> uw = userTagWeightRepository.findByIdNumber(userId);
+
+        if (uw.isEmpty()) {
+            Map<Tag, Double> popularity = getTagGlobalPopularity(tags);
+            double total = popularity.values().stream().mapToDouble(Double::doubleValue).sum();
+            for (int i = 0; i < tags.size(); i++) {
+                Tag tag = tags.get(i);
+                double norm = total == 0 ? 1.0 / tags.size() : popularity.getOrDefault(tag, 0.0) / total;
+                vector[i] = 0.1 + 0.2 * norm;
+            }
+            return vector;
+        }
+
         for (UserTagWeight w : uw) {
             int tid = w.getTagId();
             for (int i = 0; i < tags.size(); i++) {
@@ -375,7 +387,7 @@ public class MyJdbcService {
     }
 
     public double[] getSongTagVector(int songId, List<Tag> tags) {
-        Set<Integer> songTagIds = getTagIdsForSong(songId); // You must implement this
+        Set<Integer> songTagIds = getTagIdsForSong(songId);
         double[] vector = new double[tags.size()];
         for (int i = 0; i < tags.size(); i++) {
             if (songTagIds.contains(tags.get(i).getTagId())) {

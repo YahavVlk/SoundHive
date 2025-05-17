@@ -18,6 +18,7 @@ public class TrainingService {
 
     @Autowired private MyJdbcService jdbc;
     @Autowired private NeuralNetwork neuralNetwork;
+    @Autowired private RecommendationService recommendationService;
 
     private final List<TrainingExample> buffer = new ArrayList<>();
     private static final int BATCH_SIZE = 10;
@@ -28,7 +29,10 @@ public class TrainingService {
         System.out.println("[Trainer] Added training example. Current buffer size: " + buffer.size());
 
         if (buffer.size() >= BATCH_SIZE) {
+            int numFeedbacks = jdbc.getUserPlayHistory(ex.getUserId()).size();
+            int dynamicEpochs = numFeedbacks < 50 ? 15 : 10; // more epochs for early users
             neuralNetwork.setSongIdOrder(jdbc.getDistinctSongIds());
+            neuralNetwork.setEpochs(dynamicEpochs);
             neuralNetwork.trainBatch(buffer);
             buffer.clear();
 
@@ -67,10 +71,13 @@ public class TrainingService {
         System.out.println("...");
     }
 
+    /*
+    * http://localhost:8080/api/train/evaluate?userId=110011001
+    * */
     public double evaluate(String userId) {
         System.out.println("[Evaluate] Starting evaluation for user: " + userId);
 
-        // Step 1: Show the tag weights vector
+        // Step 1: Show tag vector
         double[] tagVector = jdbc.getUserTagWeightsArray(userId);
         System.out.print("[Evaluate] Tag weights vector: ");
         for (double v : tagVector) {
@@ -78,50 +85,47 @@ public class TrainingService {
         }
         System.out.println();
 
-        // Step 2: Get predicted scores from the neural network
-        Map<Integer, Double> predictedScores = jdbc.getPredictedScoreMap(userId);
-        Map<Integer, String> songTitles = jdbc.getSongTitlesMap();
+        // Step 2: Use recommendAll to get actual ranked list
+        List<Song> ranked = recommendationService.recommendAll(userId, Set.of());
+        List<Integer> top50 = ranked.stream().limit(50).map(Song::getSongId).toList();
 
-        System.out.println("[Evaluate] All predicted scores (songId → score → title):");
-        predictedScores.entrySet().stream()
-                .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
-                .forEach(entry -> {
-                    int songId = entry.getKey();
-                    double score = entry.getValue();
-                    String title = songTitles.getOrDefault(songId, "Unknown");
-                    System.out.printf("  %d → %.4f → \"%s\"%n", songId, score, title);
-                });
+        System.out.println("[Evaluate] Top 50 recommended songs (full logic):");
+        for (Song s : ranked.subList(0, Math.min(50, ranked.size()))) {
+            System.out.printf("  %d → \"%s\"%n", s.getSongId(), s.getTitle());
+        }
 
-        // Step 3: Sort and get top 50 predicted songs
-        List<Integer> top50 = predictedScores.entrySet().stream()
-                .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
-                .limit(50)
-                .map(Map.Entry::getKey)
-                .toList();
+        // Step 3: Get filtered history (≥30% listened and not skipped)
+        List<UserPlayEvent> historyEvents = jdbc.getUserPlayHistory(userId);
+        Set<Integer> history = historyEvents.stream()
+                .filter(e -> !e.isSkipped())
+                .filter(e -> {
+                    long ts = e.getId().getPlayTime().getTime();
+                    long duration = jdbc.getSongDuration(e.getSongId());
+                    double pct = Math.min(1.0, ts / (double) duration);
+                    return pct >= 0.3;
+                })
+                .map(UserPlayEvent::getSongId)
+                .collect(Collectors.toSet());
 
-        System.out.println("[Evaluate] Top 50 recommended song IDs:");
-        System.out.println(top50);
-
-        // Step 4: Get user recent history
-        Set<Integer> history = new HashSet<>(jdbc.getRecentSongIds(userId));
-        System.out.println("[Evaluate] User recent history song IDs:");
-        System.out.println(history);
+        System.out.println("[Evaluate] Filtered user history (≥30%% listened): " + history);
 
         if (history.isEmpty()) {
-            System.out.println("[Evaluate] User has no song history. Returning hit rate of 0.");
+            System.out.println("[Evaluate] User has no valid history. Returning hit rate = 0.0");
             return 0.0;
         }
 
-        // Step 5: Count hits
+        // Step 4: Count hits
         List<Integer> hits = top50.stream().filter(history::contains).toList();
-        long hitCount = hits.size();
-
-        System.out.println("[Evaluate] Matching songs in history:");
+        System.out.println("[Evaluate] Matching songs in top 50:");
         System.out.println(hits);
 
-        double hitRate = hitCount / (double) history.size();
+        double hitRate = hits.size() / (double) history.size();
         System.out.printf("[Evaluate] Final hit rate: %.2f%n", hitRate);
 
         return hitRate;
+    }
+
+    public NeuralNetwork getNeuralNetwork() {
+        return neuralNetwork;
     }
 }

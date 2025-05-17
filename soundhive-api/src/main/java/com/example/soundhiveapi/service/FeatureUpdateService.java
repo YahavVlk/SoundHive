@@ -1,6 +1,7 @@
 package com.example.soundhiveapi.service;
 
 import com.example.soundhiveapi.model.*;
+import com.example.soundhiveapi.neural.TrainingExample;
 import com.example.soundhiveapi.repository.UserPlayEventRepository;
 import com.example.soundhiveapi.repository.UserTagWeightRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +25,14 @@ public class FeatureUpdateService {
 
     private final Map<String, List<UserTagWeight>> pendingUpdates = new HashMap<>();
     private final Map<String, Integer> updateCounter = new HashMap<>();
+    private final Map<String, Map<Integer, Long>> lastTagUpdateTime = new HashMap<>();
+    private int getDynamicBatchSize(String userId) {
+        int plays = playRepo.findAllByIdUserId(userId).size();
+        if (plays < 20) return 1;
+        if (plays < 50) return 3;
+        return BATCH_SIZE;
+    }
+
 
     public void recordFeedback(String userId, int songId, long timestamp, boolean isFavorite, boolean isSkipped) {
         double actualPct = Math.min(1.0, timestamp / (double) jdbc.getSongDuration(songId));
@@ -36,26 +45,38 @@ public class FeatureUpdateService {
         List<UserTagWeight> currentWeights = tagWeightRepo.findByIdNumber(userId);
 
         Map<Integer, UserTagWeight> weightMap = new HashMap<>();
+        Map<Integer, Long> tagUpdateMap = lastTagUpdateTime.computeIfAbsent(userId, k -> new HashMap<>());
+        long now = System.currentTimeMillis();
+
         for (UserTagWeight w : currentWeights) {
             weightMap.put(w.getTagId(), new UserTagWeight(w.getIdNumber(), w.getTagId(), w.getWeight()));
         }
 
-        double positiveDelta = 0.07;
-        double negativeDelta = 0.01;
+        double positiveDelta = 0.12;
+        double negativeDelta = 0.03;
 
         for (Tag tag : tags) {
-            UserTagWeight w = weightMap.getOrDefault(tag.getTagId(), new UserTagWeight(userId, tag.getTagId(), 0.2));
+            int tagId = tag.getTagId();
+            UserTagWeight w = weightMap.getOrDefault(tagId, new UserTagWeight(userId, tagId, 0.2));
             double old = w.getWeight();
             double newWeight = old;
 
+            long lastUpdate = tagUpdateMap.getOrDefault(tagId, 0L);
+            long timeSinceUpdate = now - lastUpdate;
+            double scale = Math.min(1.0, timeSinceUpdate / 30000.0);  // 30 seconds = full strength
+
+            double scaledPositive = positiveDelta * scale;
+            double scaledNegative = negativeDelta * scale;
+
             if (isFavorite || actualPct >= 0.8) {
-                newWeight += positiveDelta;
+                newWeight += scaledPositive;
             } else if (actualPct <= 0.4 || isSkipped) {
-                newWeight -= negativeDelta;
+                newWeight -= scaledNegative;
             }
 
             w.setWeight(Math.min(1.0, Math.max(0.05, newWeight)));
-            weightMap.put(tag.getTagId(), w);
+            weightMap.put(tagId, w);
+            tagUpdateMap.put(tagId, now);
         }
 
         List<UserTagWeight> changed = new ArrayList<>();
@@ -75,9 +96,17 @@ public class FeatureUpdateService {
         updateCounter.put(userId, updateCounter.getOrDefault(userId, 0) + 1);
 
         synchronized (userId.intern()) {
-            if (updateCounter.get(userId) >= BATCH_SIZE) {
+            if (updateCounter.get(userId) >= getDynamicBatchSize(userId)) {
                 flushUserToDb(userId);
             }
+        }
+        if (playRepo.findAllByIdUserId(userId).size() < 30) {
+            double[] input = jdbc.getUserTagWeightsArray(userId);
+            Map<Integer, Double> label = new HashMap<>();
+            label.put(songId, actualPct);
+            int feedbackCount = playRepo.findAllByIdUserId(userId).size();
+            trainingService.getNeuralNetwork().setEpochs(feedbackCount < 50 ? 15 : 10);
+            trainingService.trainOnExample(new TrainingExample(userId,input, label));
         }
     }
 

@@ -66,21 +66,48 @@ public class RecommendationService {
             MyJdbcService.SongWithTags swt = jdbc.getSongWithTags(songId);
             if (swt == null || swt.tags.isEmpty()) continue;
 
+            Map<Tag, Double> globalPopularity = jdbc.getTagGlobalPopularity(swt.tags);
+            boolean isLowConfidence = swt.tags.stream()
+                    .allMatch(tag -> globalPopularity.getOrDefault(tag, 0.0) < 3); // Threshold = 3
+            if (isLowConfidence) continue;
+
             Map<Integer, Double> userWeights = new HashMap<>();
             List<Double> weights = jdbc.getTagWeightsForUser(userId, swt.tags);
             for (int j = 0; j < swt.tags.size(); j++) {
                 userWeights.put(swt.tags.get(j).getTagId(), weights.get(j));
             }
 
-            Map<Tag, Double> globalPopularity = jdbc.getTagGlobalPopularity(swt.tags);
             double rarityBonus = swt.tags.stream()
                     .mapToDouble(tag -> {
                         double count = globalPopularity.getOrDefault(tag, 0.0);
-                        double inverseFreq = 1.0 / Math.log(2 + count); // log-scaling for stability
+                        double inverseFreq = 1.0 / Math.log(2 + count);
                         return inverseFreq * userWeights.getOrDefault(tag.getTagId(), 0.0);
                     })
                     .sum();
+
             double finalScore = scores[i] + rarityWeightFactor * rarityBonus;
+
+            List<UserPlayEvent> userHistory = jdbc.getUserPlayHistory(userId);
+            boolean seenBefore = userHistory.stream().anyMatch(ev -> ev.getSongId() == songId);
+            int totalPlays = userHistory.size();
+
+            // Conditional fatigue-based boost for early users
+            if (totalPlays < 20) {
+                Map<Integer, Integer> fatigueMap = jdbc.getTagFatigue(userId);
+                double fatigueBoost = swt.tags.stream()
+                        .filter(tag -> fatigueMap.getOrDefault(tag.getTagId(), 0) <= 2
+                                && userWeights.getOrDefault(tag.getTagId(), 0.0) >= 0.3)
+                        .mapToDouble(tag -> 0.05)
+                        .sum();
+                fatigueBoost = Math.min(0.25, fatigueBoost);
+                finalScore += fatigueBoost;
+            }
+
+            if (!seenBefore && totalPlays < 20) {
+                double boost = (20 - totalPlays) / 20.0;
+                finalScore += 0.3 * boost;
+            }
+
             System.out.printf("[RecommendAll] Candidate songId=%d, title='%s', score=%.4f%n",
                     songId, song.getTitle(), finalScore);
 
@@ -89,7 +116,7 @@ public class RecommendationService {
 
         List<Song> ranked = new ArrayList<>();
         Set<Integer> seen = new HashSet<>();
-        while (!heap.isEmpty() && ranked.size() < 1000) {
+        while (!heap.isEmpty() && ranked.size() < songIds.size()) {
             int songId = heap.poll().songId;
             if (seen.contains(songId)) continue;
 
@@ -111,14 +138,26 @@ public class RecommendationService {
         Collections.shuffle(candidates);
 
         List<Song> result = new ArrayList<>();
+        Set<Integer> seen = new HashSet<>();
+
         for (int id : candidates) {
-            if (excluded.contains(id)) continue;
+            if (excluded.contains(id) || seen.contains(id)) continue;
             Song song = jdbc.getSongById(id);
-            if (song != null && !containsSong(result, song.getSongId())) {
+            if (song != null) {
                 result.add(song);
+                seen.add(id);
             }
             if (result.size() == k) break;
         }
+
+        if (result.size() < k) {
+            int remaining = k - result.size();
+            Set<Integer> allExcluded = new HashSet<>(excluded);
+            result.forEach(s -> allExcluded.add(s.getSongId()));
+            List<Song> neuralFallback = recommendNeurally(userId, remaining, allExcluded, result);
+            result.addAll(neuralFallback);
+        }
+
         return result;
     }
 

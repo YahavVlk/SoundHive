@@ -42,7 +42,6 @@ public class JwtRequestFilter extends OncePerRequestFilter {
             String jwt = authHeader.substring(7); // Remove "Bearer " prefix
 
             String email = jwtUtil.extractUsername(jwt); // Extract email from token
-            System.out.println("Extracted email: " + email);
 
             // Reject request if token was explicitly revoked (e.g., logout)
             if (tokenBlacklist.isRevoked(jwt)) {
@@ -54,8 +53,6 @@ public class JwtRequestFilter extends OncePerRequestFilter {
             if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails ud = userDetailsService.loadUserByUsername(email);
                 if (jwtUtil.validateToken(jwt, ud)) {
-                    System.out.println("JWT is valid for user: " + ud.getUsername());
-
                     // Build Spring Security authentication token and inject it
                     UsernamePasswordAuthenticationToken auth =
                             new UsernamePasswordAuthenticationToken(ud, null, ud.getAuthorities());
